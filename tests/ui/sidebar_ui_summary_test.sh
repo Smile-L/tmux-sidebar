@@ -86,12 +86,14 @@ tail_row = {
     "text": "codex",
 }
 tail_visual_lines = render.build_visual_lines([tail_row], "%4", max_width=30)
+tail_segments = tail_visual_lines[0]["segments"]
 
 print(json.dumps({
     "shell": shell_preview,
     "codex": codex_preview,
     "claude": claude_preview,
     "tail_text": [line["text"] for line in tail_visual_lines],
+    "tail_segments": tail_segments,
 }, ensure_ascii=False))
 PY
 )"
@@ -102,5 +104,7 @@ assert_contains "$output" 'Implement sidebar summary ranking'
 assert_contains "$output" 'Updated render pipeline for panel-specific previews'
 assert_contains "$output" 'Analyzing failing integration tests for tmux sidebar'
 assert_contains "$output" '…g instead of the final result'
+assert_contains "$output" '["[Codex] ", "pill"]'
+assert_contains "$output" '["⏳  ", "badge:running"]'
 assert_not_contains "$output" 'Investigating why summary lines currently'
 assert_not_contains "$output" 'lisimin@localhost poly_data %'

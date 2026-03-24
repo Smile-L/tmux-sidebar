@@ -40,7 +40,7 @@ def _should_show_window_row(display_name: str, visible_panes: list[dict], pane_s
     normalized_pane_labels = []
     for pane in visible_panes:
         pane_state = pane_states.get(pane["id"], {})
-        pane_label = pane_display_label(pane["label"], pane["title"], pane_state, pane.get("path", ""), pane.get("window_name", ""))
+        pane_label = pane_display_label(pane["label"], pane["title"], pane_state, pane.get("path", ""), pane.get("window_name", ""), pane["id"])
         normalized_pane_labels.append(_normalized_label(pane_label))
     return any(label != normalized_display_name for label in normalized_pane_labels)
 
@@ -158,7 +158,11 @@ def load_tree() -> list[dict]:
                 badge = badge_for_status(status)
                 meta = f"{pane['session']} · {display_name}"
                 preview_message = str(pane_state.get("message", "")).strip()
-                display_label = pane_display_label(pane["label"], pane["title"], pane_state, pane.get("path", ""), window["name"])
+                display_label = pane_display_label(pane["label"], pane["title"], pane_state, pane.get("path", ""), window["name"], pane["id"])
+                agent_name = titlecase_agent_name(pane["label"], pane["title"], pane_state, pane["id"])
+                text_label = display_label
+                if agent_name and display_label.lower() != agent_name.lower():
+                    text_label = f"{agent_name.lower()} · {display_label}"
                 rows.append(
                     {
                         "kind": "pane",
@@ -168,16 +172,16 @@ def load_tree() -> list[dict]:
                         "active": pane["active"],
                         "window_name": display_name,
                         "label": display_label,
-                        "agent_name": titlecase_agent_name(pane["label"], pane["title"], pane_state),
+                        "agent_name": agent_name,
                         "status": status,
                         "meta": meta,
                         "path": pane.get("path", ""),
                         "preview_message": preview_message,
                         "pane_title": pane["title"],
                         "pane_command": pane["label"],
-                        "text": display_label + (f" {badge}" if badge else ""),
+                        "text": text_label + (f" {badge}" if badge else ""),
                         "search_text": " ".join(
-                            part for part in (pane["session"], display_name, pane["label"], pane["title"], pane.get("path", ""), preview_message) if part
+                            part for part in (pane["session"], display_name, text_label, pane["label"], pane["title"], pane.get("path", ""), preview_message) if part
                         ),
                     }
                 )

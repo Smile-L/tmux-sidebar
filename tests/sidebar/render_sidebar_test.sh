@@ -70,3 +70,35 @@ output="$(bash scripts/features/sidebar/render-sidebar.sh)"
 first_session_line="$(printf '%s\n' "$output" | grep -E '^  (ops|work)$' | head -n 1)"
 
 assert_eq "$first_session_line" '  ops'
+
+fake_tmux_set_tree <<'EOF'
+work|@1|editor|%1|node|v4|0|/mnt/nas205/workspace/simin.li/wechat_robot
+work|@1|editor|%2|bash|v4|1|/mnt/nas205/workspace/simin.li/sync_code/pr_paper_data/experiments
+chat|@2|agent|%3|python3|● project: running|1|/mnt/nas205/workspace/simin.li/sync_code/medical_nlp_paper
+EOF
+
+rm -rf "$TMUX_SIDEBAR_STATE_DIR"
+mkdir -p "$TMUX_SIDEBAR_STATE_DIR"
+cat > "$TMUX_SIDEBAR_STATE_DIR/pane-%1.json" <<'EOF'
+{"pane_id":"%1","app":"codex","status":"running","updated_at":100}
+EOF
+cat > "$TMUX_SIDEBAR_STATE_DIR/pane-%3.json" <<'EOF'
+{"pane_id":"%3","app":"claude","status":"running","updated_at":100}
+EOF
+
+output="$(bash scripts/features/sidebar/render-sidebar.sh)"
+
+case "$output" in
+  *$'\n  codex · simin.li/wechat_robot ⏳\n'* | *$'\n  codex · wechat_robot ⏳\n'* ) ;;
+  * ) fail "expected codex pane to show path tail instead of generic title" ;;
+esac
+
+case "$output" in
+  *$'\n  sync_code/pr_paper_data/experiments\n'* | *$'\n  pr_paper_data/experiments\n'* ) ;;
+  * ) fail "expected shell pane to show current path tail" ;;
+esac
+
+case "$output" in
+  *$'\n  claude · sync_code/medical_nlp_paper ⏳'* | *$'\n  claude · medical_nlp_paper ⏳'* ) ;;
+  * ) fail "expected claude pane to show path tail instead of generic title" ;;
+esac

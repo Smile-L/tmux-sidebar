@@ -285,6 +285,19 @@ def _session_header_segments(title: str, max_width: int | None = None) -> tuple[
     )
 
 
+def _pane_title_segment(row: dict, prefix: str, badge: str, max_width: int | None) -> str:
+    title_label = row.get("label") or row.get("window_name") or row.get("pane_command") or row.get("text") or ""
+    if max_width is None:
+        return title_label
+    reserved = len(prefix)
+    if row.get("agent_name"):
+        reserved += len(f"[{row['agent_name']}] ")
+    if badge:
+        reserved += len(f"{badge}  ")
+    available = max(1, max_width - reserved)
+    return truncate_line_tail(str(title_label), available)
+
+
 def build_visual_lines(rows: list[dict], selected_pane_id: str, max_width: int | None = None) -> list[dict]:
     visual_lines: list[dict] = []
     selected_row = find_selected_row_index(rows, selected_pane_id)
@@ -319,10 +332,10 @@ def build_visual_lines(rows: list[dict], selected_pane_id: str, max_width: int |
             base_segments = [(prefix, "base")]
             if row.get("agent_name"):
                 base_segments.append((f"[{row['agent_name']}] ", "pill"))
-            title_label = row.get("label") or row.get("window_name") or row.get("pane_command") or row.get("text") or ""
-            base_segments.append((title_label, "title"))
             if badge:
-                base_segments.append((f" [{badge}]", f"badge:{row.get('status', '')}"))
+                base_segments.append((f"{badge}  ", f"badge:{row.get('status', '')}"))
+            title_label = _pane_title_segment(row, prefix, badge, max_width)
+            base_segments.append((title_label, "title"))
             visual_lines.append(
                 {
                     "row_index": row_index,
@@ -349,7 +362,7 @@ def build_visual_lines(rows: list[dict], selected_pane_id: str, max_width: int |
                         "kind": row["kind"],
                         "selected": is_selected,
                         "segments": [(indent + meta_text, "muted")],
-                        "text": truncate_line(indent + meta_text, max_width),
+                        "text": truncate_line_tail(indent + meta_text, max_width),
                     }
                 )
                 for preview in _selected_preview_lines(row):

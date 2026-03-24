@@ -3,10 +3,11 @@ set -gF @tmux_sidebar_dir "#{d:current_file}"
 run-shell -b "#{@tmux_sidebar_dir}/scripts/features/sidebar/configure-pane-border-format.sh"
 bind-key T run-shell -b "#{@tmux_sidebar_dir}/scripts/features/sidebar/toggle-sidebar.sh"
 bind-key t run-shell -b "#{@tmux_sidebar_dir}/scripts/features/sidebar/focus-sidebar.sh"
-set-hook -g "client-active[198]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/ensure-sidebar-pane.sh'"
+# tmux 3.2a does not support client-active/client-focus-in.
+if-shell -F '#{>=:#{version},3.3}' 'set-hook -g "client-active[198]" "run-shell -b \"#{@tmux_sidebar_dir}/scripts/features/sidebar/ensure-sidebar-pane.sh\""'
 set-hook -g "client-attached[199]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/ensure-sidebar-pane.sh'"
 set-hook -g "client-session-changed[200]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/on-pane-focus.sh #{pane_id} #{window_id}'"
-set-hook -g "client-focus-in[202]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/on-pane-focus.sh #{pane_id} #{window_id}'"
+if-shell -F '#{>=:#{version},3.3}' 'set-hook -g "client-focus-in[202]" "run-shell -b \"#{@tmux_sidebar_dir}/scripts/features/sidebar/on-pane-focus.sh #{pane_id} #{window_id}\""'
 set-hook -g "after-select-window[203]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/on-pane-focus.sh #{pane_id} #{window_id}'"
 set-hook -g "after-select-pane[204]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/on-pane-focus.sh #{pane_id} #{window_id}'"
 set-hook -g "session-window-changed[205]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/on-pane-focus.sh #{pane_id} #{window_id}'"

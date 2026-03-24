@@ -79,6 +79,15 @@ _PROMPT_TITLE_RE = re.compile(r"^(?:\([^)]*\)\s*)?[A-Za-z0-9._-]+@[A-Za-z0-9._-]
 _PYTHON_REPL_PROMPT_RE = re.compile(r"^(>>>|\.\.\.)\s*$")
 _IPYTHON_REPL_PROMPT_RE = re.compile(r"^In \[\d+\]:\s*$")
 _NODE_REPL_PROMPT_RE = re.compile(r"^>\s*$")
+_CODEX_BANNER_RE = re.compile(r"OpenAI Codex\s+\(v[^)]+\)")
+_CODEX_WORKING_RE = re.compile(r"^\s*[•·]\s+Working \([^)]*esc to interrupt\).*$", re.MULTILINE)
+_CODEX_APPROVAL_RE = re.compile(
+    r"Would you like to run the following command\?|Press enter to confirm or esc to cancel",
+    re.IGNORECASE,
+)
+_CODEX_PROMPT_RE = re.compile(r"^\s*›\s+.+$")
+INFERRED_CODEX_RUNNING_HOLD_SECONDS = 5
+INFERRED_CODEX_NEEDS_INPUT_HOLD_SECONDS = 10
 
 
 def configured_badges() -> dict[str, str]:
@@ -98,8 +107,15 @@ def badge_for_status(status: str) -> str:
     return configured_badges().get(status, "")
 
 
-def titlecase_agent_name(command: str, title: str, state: dict | None) -> str:
+def _resolved_live_app(command: str, title: str, state: dict | None, pane_id: str = "") -> str:
     live_app = live_agent_app(command, title, state)
+    if live_app != "codex" and pane_id and codex_terminal_signature(pane_id):
+        return "codex"
+    return live_app
+
+
+def titlecase_agent_name(command: str, title: str, state: dict | None, pane_id: str = "") -> str:
+    live_app = _resolved_live_app(command, title, state, pane_id)
     if live_app == "codex":
         return "Codex"
     if live_app == "claude":
@@ -120,6 +136,22 @@ def _capture_tail_lines(pane_id: str, limit: int = 4) -> list[str]:
     try:
         capture = run_tmux("capture-pane", "-pt", pane_id)
     except Exception:
+        return []
+    return [line.rstrip() for line in capture.splitlines() if line.strip()][-limit:]
+
+
+def _capture_pane_text(pane_id: str) -> str:
+    if not pane_id:
+        return ""
+    try:
+        return run_tmux("capture-pane", "-pt", pane_id)
+    except Exception:
+        return ""
+
+
+def _capture_recent_lines(pane_id: str, limit: int = 30) -> list[str]:
+    capture = _capture_pane_text(pane_id)
+    if not capture:
         return []
     return [line.rstrip() for line in capture.splitlines() if line.strip()][-limit:]
 
@@ -150,13 +182,35 @@ def looks_like_script_runner(command: str) -> bool:
     return False
 
 
-def infer_script_runtime_status(pane_id: str, command: str, active: bool, state: dict | None) -> str:
+def codex_terminal_signature(pane_id: str) -> bool:
+    recent_lines = _capture_recent_lines(pane_id, limit=30)
+    if not recent_lines:
+        return False
+    recent = "\n".join(recent_lines)
+    if _CODEX_BANNER_RE.search(recent) or _CODEX_APPROVAL_RE.search(recent) or _CODEX_WORKING_RE.search(recent):
+        return True
+    tail = [line.strip() for line in recent_lines[-20:]]
+    if not tail:
+        return False
+    has_prompt = any(line.startswith("›") for line in tail)
+    has_status_line = any("gpt-" in line and "·" in line for line in tail)
+    return has_prompt and has_status_line
+
+
+def infer_script_runtime_status(pane_id: str, command: str, title: str, active: bool, state: dict | None) -> str:
     token = normalize_token(command)
+    if title.strip() == "Sidebar":
+        return ""
     existing_app = str((state or {}).get("app", "")).strip().lower()
     existing_status = str((state or {}).get("status", "")).strip().lower()
     existing_script_state = existing_app == SCRIPT_STATE_APP and existing_status in ("running", "done", "done-unread")
 
-    if existing_app in ("claude", "codex") or looks_like_codex(command) or looks_like_claude(command):
+    if (
+        existing_app in ("claude", "codex")
+        or looks_like_codex(command)
+        or looks_like_claude(command)
+        or codex_terminal_signature(pane_id)
+    ):
         return ""
 
     if looks_like_script_runner(command):
@@ -184,12 +238,24 @@ def infer_script_runtime_status(pane_id: str, command: str, active: bool, state:
 def sync_inferred_script_states(sessions: dict, pane_states: dict[str, dict]) -> dict[str, dict]:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     updated_states = dict(pane_states)
+    now = int(time.time())
     for session in sessions.values():
         for window in session["windows"].values():
             for pane in window["panes"]:
                 pane_state = updated_states.get(pane["id"], {})
-                inferred_status = infer_script_runtime_status(pane["id"], pane["label"], pane["active"], pane_state)
+                inferred_status = infer_script_runtime_status(
+                    pane["id"], pane["label"], pane["title"], pane["active"], pane_state
+                )
                 if not inferred_status:
+                    if str(pane_state.get("app", "")).strip().lower() == SCRIPT_STATE_APP:
+                        state_path = STATE_DIR / f"pane-{pane['id']}.json"
+                        try:
+                            state_path.unlink()
+                        except FileNotFoundError:
+                            pass
+                        except OSError:
+                            pass
+                        updated_states.pop(pane["id"], None)
                     continue
                 message = str(pane_state.get("message", "")).strip() or pane["label"]
                 if (
@@ -219,6 +285,76 @@ def sync_inferred_script_states(sessions: dict, pane_states: dict[str, dict]) ->
                 except OSError:
                     continue
                 updated_states[pane["id"]] = next_state
+    for session in sessions.values():
+        for window in session["windows"].values():
+            for pane in window["panes"]:
+                pane_state = updated_states.get(pane["id"], {})
+                live_app = _resolved_live_app(pane["label"], pane["title"], pane_state, pane["id"])
+                existing_app = str((pane_state or {}).get("app", "")).strip().lower()
+                existing_status = str((pane_state or {}).get("status", "")).strip().lower()
+                inferred = bool((pane_state or {}).get("inferred"))
+                state_path = STATE_DIR / f"pane-{pane['id']}.json"
+
+                if live_app != "codex":
+                    if inferred and existing_app == "codex":
+                        try:
+                            state_path.unlink()
+                        except FileNotFoundError:
+                            pass
+                        except OSError:
+                            pass
+                        updated_states.pop(pane["id"], None)
+                    continue
+
+                terminal_status = codex_terminal_status(pane["id"])
+                if terminal_status:
+                    next_state = {
+                        "pane_id": pane["id"],
+                        "session_name": pane["session"],
+                        "window_id": pane["window"],
+                        "window_name": window["name"],
+                        "pane_title": pane["title"],
+                        "pane_current_command": pane["label"],
+                        "app": "codex",
+                        "status": terminal_status,
+                        "message": str(pane_state.get("message", "")).strip(),
+                        "updated_at": now,
+                        "inferred": True,
+                    }
+                    tmp_path = state_path.with_suffix(".tmp")
+                    try:
+                        tmp_path.write_text(json.dumps(next_state, separators=(",", ":")) + "\n")
+                        tmp_path.rename(state_path)
+                    except OSError:
+                        continue
+                    updated_states[pane["id"]] = next_state
+                    continue
+
+                if inferred and existing_app == "codex":
+                    if codex_terminal_idle(pane["id"]):
+                        try:
+                            state_path.unlink()
+                        except FileNotFoundError:
+                            pass
+                        except OSError:
+                            pass
+                        updated_states.pop(pane["id"], None)
+                        continue
+                    updated_at = int((pane_state or {}).get("updated_at", 0) or 0)
+                    hold_seconds = 0
+                    if existing_status == "running":
+                        hold_seconds = INFERRED_CODEX_RUNNING_HOLD_SECONDS
+                    elif existing_status == "needs-input":
+                        hold_seconds = INFERRED_CODEX_NEEDS_INPUT_HOLD_SECONDS
+                    if hold_seconds and now - updated_at <= hold_seconds:
+                        continue
+                    try:
+                        state_path.unlink()
+                    except FileNotFoundError:
+                        pass
+                    except OSError:
+                        pass
+                    updated_states.pop(pane["id"], None)
     return updated_states
 
 
@@ -246,6 +382,28 @@ def _path_leaf(path: str) -> str:
         return ""
     parts = re.split(r"[\\/]+", trimmed)
     return parts[-1] if parts else trimmed
+
+
+def _path_tail(path: str, parts: int = 2) -> str:
+    raw = str(path).strip()
+    if not raw:
+        return ""
+    trimmed = raw.rstrip("/\\")
+    if not trimmed:
+        return ""
+    segments = [segment for segment in re.split(r"[\\/]+", trimmed) if segment]
+    if not segments:
+        return ""
+    if parts <= 1 or len(segments) <= parts:
+        return "/".join(segments[-parts:])
+    return "/".join(segments[-parts:])
+
+
+def _looks_like_generic_title(value: str) -> bool:
+    token = normalize_token(value)
+    if not token:
+        return False
+    return bool(re.match(r"^v\d+(?:[._-]\d+)*$", token))
 
 
 def _meaningful_label(candidate: str, command: str) -> str:
@@ -308,19 +466,37 @@ def live_agent_app(command: str, title: str, state: dict | None) -> str:
 
 
 def codex_terminal_status(pane_id: str) -> str:
-    if not pane_id:
+    recent_lines = _capture_recent_lines(pane_id, limit=20)
+    if not recent_lines:
         return ""
-    try:
-        capture = run_tmux("capture-pane", "-pt", pane_id)
-    except Exception:
-        return ""
-    if re.search(r"^\s*[•·]\s+Working \([^)]*esc to interrupt\)\s*$", capture, re.MULTILINE):
+    recent = "\n".join(recent_lines)
+    if _CODEX_APPROVAL_RE.search(recent):
+        return "needs-input"
+    if _CODEX_WORKING_RE.search(recent):
         return "running"
+    if any(_CODEX_PROMPT_RE.match(line.strip()) for line in recent_lines[-3:]):
+        return ""
     return ""
 
 
+def codex_terminal_idle(pane_id: str) -> bool:
+    recent_lines = _capture_recent_lines(pane_id, limit=20)
+    if not recent_lines:
+        return False
+    if codex_terminal_status(pane_id):
+        return False
+    tail = [line.strip() for line in recent_lines[-5:]]
+    has_prompt = any(_CODEX_PROMPT_RE.match(line) for line in tail)
+    has_status_line = any("gpt-" in line and "·" in line for line in recent_lines[-8:])
+    return has_prompt and has_status_line
+
+
 def effective_pane_status(pane_id: str, command: str, title: str, state: dict | None) -> str:
+    if title.strip() == "Sidebar":
+        return ""
     live_app = live_agent_app(command, title, state)
+    if live_app != "codex" and codex_terminal_signature(pane_id):
+        live_app = "codex"
     if not live_app:
         script_app = str((state or {}).get("app", "")).strip().lower()
         script_status = str((state or {}).get("status", "")).strip().lower()
@@ -330,6 +506,8 @@ def effective_pane_status(pane_id: str, command: str, title: str, state: dict | 
 
     status = str((state or {}).get("status", "")).strip().lower()
     if live_app == "codex":
+        if bool((state or {}).get("inferred")) and codex_terminal_idle(pane_id):
+            return ""
         if status in ("running", "needs-input", "error", "done", "done-unread"):
             return status
         terminal_status = codex_terminal_status(pane_id)
@@ -347,20 +525,30 @@ def effective_pane_status(pane_id: str, command: str, title: str, state: dict | 
     return ""
 
 
-def pane_display_label(command: str, title: str, state: dict | None, path: str = "", window_name: str = "") -> str:
-    live_app = live_agent_app(command, title, state)
+def pane_display_label(command: str, title: str, state: dict | None, path: str = "", window_name: str = "", pane_id: str = "") -> str:
+    live_app = _resolved_live_app(command, title, state, pane_id)
+    path_label = _path_tail(path, parts=2)
+    if live_app and path_label:
+        return path_label
     if live_app:
         return live_app
     contextual_title = _meaningful_label(title, command)
+    if _looks_like_generic_title(contextual_title):
+        contextual_title = ""
+    if path_label and normalize_token(command) in SHELL_COMMANDS:
+        return path_label
+    if path_label and looks_like_script_runner(command):
+        return path_label
     if contextual_title:
         return contextual_title
     if looks_like_script_runner(command) or looks_like_semver(command):
         contextual_window_name = _meaningful_label(window_name, command)
         if contextual_window_name:
             return contextual_window_name
-        path_label = _path_leaf(path)
         if path_label:
             return path_label
+    if path_label and _looks_like_generic_title(title):
+        return path_label
     return command
 
 
@@ -385,7 +573,7 @@ def window_display_name(window_name: str, panes: list[dict], pane_states: dict[s
 
     for pane in sorted(panes, key=lambda p: not p["active"]):
         pane_state = pane_states.get(pane["id"], {})
-        label = pane_display_label(pane["label"], pane["title"], pane_state, pane.get("path", ""), window_name)
+        label = pane_display_label(pane["label"], pane["title"], pane_state, pane.get("path", ""), window_name, pane["id"])
         if label != pane["label"]:
             return label
 
