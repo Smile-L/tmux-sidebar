@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 from .core import STATE_DIR, run_tmux, tmux_option
-from .tree import find_selected_row_index, truncate_line
+from .tree import find_selected_row_index, truncate_line, truncate_line_tail
 from .status import badge_for_status
 
 
@@ -359,7 +359,7 @@ def build_visual_lines(rows: list[dict], selected_pane_id: str, max_width: int |
                             "kind": row["kind"],
                             "selected": is_selected,
                             "segments": [(indent + preview, "preview")],
-                            "text": truncate_line(indent + preview, max_width),
+                            "text": truncate_line_tail(indent + preview, max_width),
                         }
                     )
             continue

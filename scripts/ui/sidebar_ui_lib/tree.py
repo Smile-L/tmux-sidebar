@@ -196,6 +196,18 @@ def truncate_line(line: str, width: int | None) -> str:
     return line[: width - 1] + "…"
 
 
+def truncate_line_tail(line: str, width: int | None) -> str:
+    if width is None:
+        return line
+    if width <= 0:
+        return ""
+    if len(line) <= width:
+        return line
+    if width == 1:
+        return "…"
+    return "…" + line[-(width - 1):]
+
+
 def render_rows(rows: list[dict], selected_pane_id: str | None = None, max_width: int | None = None) -> list[str]:
     rendered: list[str] = []
     selected_row = next(

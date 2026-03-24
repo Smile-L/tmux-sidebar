@@ -68,7 +68,31 @@ render.run_tmux = lambda *args: "\n".join([
 ])
 claude_preview = render._selected_preview_lines(claude_row)
 
-print(json.dumps({"shell": shell_preview, "codex": codex_preview, "claude": claude_preview}, ensure_ascii=False))
+tail_row = {
+    "kind": "pane",
+    "pane_id": "%4",
+    "session": "work",
+    "window": "@1",
+    "active": True,
+    "window_name": "chat",
+    "label": "codex",
+    "agent_name": "Codex",
+    "status": "running",
+    "meta": "work · chat",
+    "path": "/Users/lisimin/project/poly_data",
+    "preview_message": "Investigating why summary lines currently show the beginning instead of the final result",
+    "pane_title": "codex",
+    "pane_command": "codex",
+    "text": "codex",
+}
+tail_visual_lines = render.build_visual_lines([tail_row], "%4", max_width=30)
+
+print(json.dumps({
+    "shell": shell_preview,
+    "codex": codex_preview,
+    "claude": claude_preview,
+    "tail_text": [line["text"] for line in tail_visual_lines],
+}, ensure_ascii=False))
 PY
 )"
 
@@ -77,4 +101,6 @@ assert_contains "$output" 'cd project/poly_data'
 assert_contains "$output" 'Implement sidebar summary ranking'
 assert_contains "$output" 'Updated render pipeline for panel-specific previews'
 assert_contains "$output" 'Analyzing failing integration tests for tmux sidebar'
+assert_contains "$output" '…g instead of the final result'
+assert_not_contains "$output" 'Investigating why summary lines currently'
 assert_not_contains "$output" 'lisimin@localhost poly_data %'
