@@ -259,25 +259,46 @@ assert_contains "$output" '✅'
 assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%17.json" '"status":"done"'
 
 fake_tmux_set_tree <<'EOF'
-test|@1|python3.12|%30|python3.12|python3.12|1
+test|@1|python3.12|%30|python3.12|python3.12|1|/Users/lisimin/project/poly_data
 EOF
 rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
 
 output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 
-python_count="$(printf '%s\n' "$output" | grep -c '^  python3\.12' || true)"
-assert_eq "$python_count" "1"
+assert_contains "$output" 'poly_data'
+assert_not_contains "$output" 'python3.12'
 
 fake_tmux_set_tree <<'EOF'
-test|@1|python3.12|%30|python3.12|python3.12|1
-test|@1|python3.12|%31|python3.12|python3.12|0
+test|@1|python3.12|%30|python3.12|python3.12|1|/Users/lisimin/project/poly_data
+test|@1|python3.12|%31|python3.12|python3.12|0|/Users/lisimin/project/poly_jp
 EOF
 rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
 
 output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 
-python_count="$(printf '%s\n' "$output" | grep -c '^  python3\.12' || true)"
-assert_eq "$python_count" "2"
+assert_contains "$output" 'poly_data'
+assert_contains "$output" 'poly_jp'
+assert_not_contains "$output" 'python3.12'
+
+fake_tmux_set_tree <<'EOF'
+test|@1|Python|%30|python3.12|bogon|1|/Users/lisimin/project/poly_data
+EOF
+rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
+
+output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
+
+assert_contains "$output" 'bogon'
+assert_not_contains "$output" 'Python'
+
+fake_tmux_set_tree <<'EOF'
+test|@1|node|%30|node|bogon|1|/Users/lisimin/project/poly_data
+EOF
+rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
+
+output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
+
+assert_contains "$output" 'bogon'
+assert_not_contains "$output" 'node'
 
 fake_tmux_set_tree <<'EOF'
 test|@1|POLY|%31|zsh|zsh|1

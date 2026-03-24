@@ -75,6 +75,7 @@ _badge_cache: dict[str, str] | None = None
 _SHELL_PROMPT_RE = re.compile(
     r"^(?:\([^)]*\)\s*)?(?:(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9._~/-]+\s+)?[%#$]\s*$"
 )
+_PROMPT_TITLE_RE = re.compile(r"^(?:\([^)]*\)\s*)?[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:.*$")
 _PYTHON_REPL_PROMPT_RE = re.compile(r"^(>>>|\.\.\.)\s*$")
 _IPYTHON_REPL_PROMPT_RE = re.compile(r"^In \[\d+\]:\s*$")
 _NODE_REPL_PROMPT_RE = re.compile(r"^>\s*$")
@@ -236,6 +237,31 @@ def looks_like_semver(value: str) -> bool:
     return bool(SEMVER_PATTERN.match(normalize_token(value)))
 
 
+def _path_leaf(path: str) -> str:
+    raw = str(path).strip()
+    if not raw:
+        return ""
+    trimmed = raw.rstrip("/\\")
+    if not trimmed:
+        return ""
+    parts = re.split(r"[\\/]+", trimmed)
+    return parts[-1] if parts else trimmed
+
+
+def _meaningful_label(candidate: str, command: str) -> str:
+    value = str(candidate).strip()
+    if not value:
+        return ""
+    token = normalize_token(value)
+    if not token or token == normalize_token(command):
+        return ""
+    if token in NON_AGENT_COMMANDS or looks_like_semver(value):
+        return ""
+    if _PROMPT_TITLE_RE.match(value):
+        return ""
+    return value
+
+
 def should_preserve_live_label(command: str, title: str) -> bool:
     command_token = normalize_token(command)
     title_token = normalize_token(title)
@@ -321,15 +347,31 @@ def effective_pane_status(pane_id: str, command: str, title: str, state: dict | 
     return ""
 
 
-def pane_display_label(command: str, title: str, state: dict | None) -> str:
+def pane_display_label(command: str, title: str, state: dict | None, path: str = "", window_name: str = "") -> str:
     live_app = live_agent_app(command, title, state)
     if live_app:
         return live_app
+    contextual_title = _meaningful_label(title, command)
+    if contextual_title:
+        return contextual_title
+    if looks_like_script_runner(command) or looks_like_semver(command):
+        contextual_window_name = _meaningful_label(window_name, command)
+        if contextual_window_name:
+            return contextual_window_name
+        path_label = _path_leaf(path)
+        if path_label:
+            return path_label
     return command
 
 
 def auto_window_name(window_name: str, panes: list[dict]) -> bool:
-    if looks_like_semver(window_name) or looks_like_codex(window_name) or looks_like_claude(window_name):
+    if (
+        looks_like_semver(window_name)
+        or looks_like_codex(window_name)
+        or looks_like_claude(window_name)
+        or looks_like_script_runner(window_name)
+        or normalize_token(window_name) in SHELL_COMMANDS
+    ):
         return True
     active_pane = next((pane for pane in panes if pane["active"]), panes[0] if panes else None)
     if active_pane is None:
@@ -343,7 +385,7 @@ def window_display_name(window_name: str, panes: list[dict], pane_states: dict[s
 
     for pane in sorted(panes, key=lambda p: not p["active"]):
         pane_state = pane_states.get(pane["id"], {})
-        label = pane_display_label(pane["label"], pane["title"], pane_state)
+        label = pane_display_label(pane["label"], pane["title"], pane_state, pane.get("path", ""), window_name)
         if label != pane["label"]:
             return label
 

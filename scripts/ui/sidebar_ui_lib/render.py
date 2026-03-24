@@ -16,16 +16,33 @@ from .status import badge_for_status
 COLOR_PAIR_SESSION = 1
 COLOR_PAIR_WINDOW = 2
 COLOR_PAIR_PANE = 3
+COLOR_PAIR_SELECTED = 4
+COLOR_PAIR_SECTION = 5
+COLOR_PAIR_DIVIDER = 6
+COLOR_PAIR_MUTED = 7
+COLOR_PAIR_PREVIEW = 8
+COLOR_PAIR_PILL = 9
 COLOR_PAIR_BADGE_RUNNING = 10
 COLOR_PAIR_BADGE_NEEDS_INPUT = 11
 COLOR_PAIR_BADGE_DONE = 12
 COLOR_PAIR_BADGE_DONE_UNREAD = 13
 COLOR_PAIR_BADGE_ERROR = 14
-DEFAULT_COLOR_FG = "ffffff"
+COLOR_PAIR_SELECTED_MUTED = 15
+COLOR_PAIR_SELECTED_PILL = 16
+COLOR_PAIR_SELECTED_BADGE_RUNNING = 17
+COLOR_PAIR_SELECTED_BADGE_NEEDS_INPUT = 18
+COLOR_PAIR_SELECTED_BADGE_DONE = 19
+COLOR_PAIR_SELECTED_BADGE_DONE_UNREAD = 20
+COLOR_PAIR_SELECTED_BADGE_ERROR = 21
+DEFAULT_COLOR_FG = "d6dfeb"
 _HEX_COLOR_RE = re.compile(r"#([0-9a-fA-F]{6})")
 _CUBE_VALUES = [0, 95, 135, 175, 215, 255]
 _last_row_map_json = ""
 _badge_attrs: dict[str, int] = {}
+_role_attrs: dict[str, int] = {}
+_selected_role_attrs: dict[str, int] = {}
+_color_slots: dict[str, int] = {}
+_next_color_slot = 16
 _PROMPT_RE = re.compile(
     r"^(?:\([^)]*\)\s*)?(?P<user>[A-Za-z0-9._-]+)@(?P<host>[A-Za-z0-9._-]+)\s+(?P<cwd>[^\s]+)\s*[%#$]\s*(?P<cmd>.*)$"
 )
@@ -465,12 +482,31 @@ def _option_hex(option: str) -> str:
     return ""
 
 
-def _define_color(slot: int, hex_color: str) -> int:
+def _theme_hex(option: str, default: str) -> str:
+    return _option_hex(option) or default
+
+
+def _reset_color_slots() -> None:
+    global _color_slots, _next_color_slot
+    _color_slots = {}
+    _next_color_slot = 16
+
+
+def _define_color(hex_color: str) -> int:
+    global _next_color_slot
     r = int(hex_color[0:2], 16)
     g = int(hex_color[2:4], 16)
     b = int(hex_color[4:6], 16)
     if curses.can_change_color():
+        cached_slot = _color_slots.get(hex_color)
+        if cached_slot is not None:
+            return cached_slot
+        if _next_color_slot >= getattr(curses, "COLORS", 0):
+            return hex_to_256(hex_color)
+        slot = _next_color_slot
+        _next_color_slot += 1
         curses.init_color(slot, r * 1000 // 255, g * 1000 // 255, b * 1000 // 255)
+        _color_slots[hex_color] = slot
         return slot
     return hex_to_256(hex_color)
 
@@ -488,40 +524,48 @@ def _parse_border_format_colors() -> dict[str, str]:
 
 
 def init_sidebar_colors() -> tuple[int, int, int, int]:
-    global _badge_attrs
+    global _badge_attrs, _role_attrs, _selected_role_attrs
     _badge_attrs = {}
+    _role_attrs = {}
+    _selected_role_attrs = {}
     try:
         if curses.COLORS < 256:
-            return curses.A_BOLD, 0, 0, 0
+            return curses.A_REVERSE | curses.A_BOLD, curses.A_BOLD, curses.A_DIM, 0
     except AttributeError:
-        return curses.A_BOLD, 0, 0, 0
-    fmt_colors = _parse_border_format_colors()
-    session_hex = (
-        _option_hex("@tmux_sidebar_color_session")
-        or parse_fg_hex(tmux_option("pane-active-border-style"))
-        or DEFAULT_COLOR_FG
-    )
-    window_hex = (
-        _option_hex("@tmux_sidebar_color_window")
-        or fmt_colors.get("inactive_command", "")
-        or parse_fg_hex(tmux_option("pane-border-style"))
-        or DEFAULT_COLOR_FG
-    )
-    pane_hex = (
-        _option_hex("@tmux_sidebar_color_pane")
-        or fmt_colors.get("active_path", "")
-        or parse_fg_hex(tmux_option("status-style"))
-        or DEFAULT_COLOR_FG
-    )
-    curses.init_pair(COLOR_PAIR_SESSION, _define_color(240, session_hex), -1)
-    curses.init_pair(COLOR_PAIR_WINDOW, _define_color(241, window_hex), -1)
-    curses.init_pair(COLOR_PAIR_PANE, _define_color(242, pane_hex), -1)
+        return curses.A_REVERSE | curses.A_BOLD, curses.A_BOLD, curses.A_DIM, 0
+
+    _reset_color_slots()
+
+    session_hex = _theme_hex("@tmux_sidebar_color_session", "5b8bd9")
+    window_hex = _theme_hex("@tmux_sidebar_color_window", "8fa2ba")
+    pane_hex = _theme_hex("@tmux_sidebar_color_pane", DEFAULT_COLOR_FG)
+    section_hex = _theme_hex("@tmux_sidebar_color_section", "305ea8")
+    divider_hex = _theme_hex("@tmux_sidebar_color_divider", "4d6482")
+    muted_hex = _theme_hex("@tmux_sidebar_color_muted", "7d91aa")
+    preview_hex = _theme_hex("@tmux_sidebar_color_preview", muted_hex)
+    pill_hex = _theme_hex("@tmux_sidebar_color_pill", "7fb3ff")
+    selected_fg_hex = _theme_hex("@tmux_sidebar_color_selected_fg", "f3f8ff")
+    selected_bg_hex = _theme_hex("@tmux_sidebar_color_selected_bg", "153d73")
+    selected_muted_hex = _theme_hex("@tmux_sidebar_color_selected_muted", "bfd4ff")
+
+    curses.init_pair(COLOR_PAIR_SESSION, _define_color(session_hex), -1)
+    curses.init_pair(COLOR_PAIR_WINDOW, _define_color(window_hex), -1)
+    curses.init_pair(COLOR_PAIR_PANE, _define_color(pane_hex), -1)
+    curses.init_pair(COLOR_PAIR_SELECTED, _define_color(selected_fg_hex), _define_color(selected_bg_hex))
+    curses.init_pair(COLOR_PAIR_SECTION, _define_color(section_hex), -1)
+    curses.init_pair(COLOR_PAIR_DIVIDER, _define_color(divider_hex), -1)
+    curses.init_pair(COLOR_PAIR_MUTED, _define_color(muted_hex), -1)
+    curses.init_pair(COLOR_PAIR_PREVIEW, _define_color(preview_hex), -1)
+    curses.init_pair(COLOR_PAIR_PILL, _define_color(pill_hex), -1)
+    curses.init_pair(COLOR_PAIR_SELECTED_MUTED, _define_color(selected_muted_hex), _define_color(selected_bg_hex))
+    curses.init_pair(COLOR_PAIR_SELECTED_PILL, _define_color(selected_fg_hex), _define_color(selected_bg_hex))
+
     badge_colors = {
-        "running": "d4a72c",
-        "needs-input": "d97706",
-        "done": "65a30d",
-        "done-unread": "ca8a04",
-        "error": "dc2626",
+        "running": _theme_hex("@tmux_sidebar_color_badge_running", "ff8c42"),
+        "needs-input": _theme_hex("@tmux_sidebar_color_badge_needs_input", "ffb15c"),
+        "done": _theme_hex("@tmux_sidebar_color_badge_done", "16a34a"),
+        "done-unread": _theme_hex("@tmux_sidebar_color_badge_done_unread", "f59e0b"),
+        "error": _theme_hex("@tmux_sidebar_color_badge_error", "ef4444"),
     }
     badge_pairs = {
         "running": COLOR_PAIR_BADGE_RUNNING,
@@ -530,11 +574,40 @@ def init_sidebar_colors() -> tuple[int, int, int, int]:
         "done-unread": COLOR_PAIR_BADGE_DONE_UNREAD,
         "error": COLOR_PAIR_BADGE_ERROR,
     }
+    selected_badge_pairs = {
+        "running": COLOR_PAIR_SELECTED_BADGE_RUNNING,
+        "needs-input": COLOR_PAIR_SELECTED_BADGE_NEEDS_INPUT,
+        "done": COLOR_PAIR_SELECTED_BADGE_DONE,
+        "done-unread": COLOR_PAIR_SELECTED_BADGE_DONE_UNREAD,
+        "error": COLOR_PAIR_SELECTED_BADGE_ERROR,
+    }
     for status, pair_id in badge_pairs.items():
-        curses.init_pair(pair_id, _define_color(242 + pair_id, badge_colors[status]), -1)
+        curses.init_pair(pair_id, _define_color(badge_colors[status]), -1)
         _badge_attrs[status] = curses.color_pair(pair_id) | curses.A_BOLD
+        curses.init_pair(selected_badge_pairs[status], _define_color(badge_colors[status]), _define_color(selected_bg_hex))
+        _selected_role_attrs[f"badge:{status}"] = curses.color_pair(selected_badge_pairs[status]) | curses.A_BOLD
+
+    _role_attrs = {
+        "section": curses.color_pair(COLOR_PAIR_SECTION) | curses.A_BOLD,
+        "divider": curses.color_pair(COLOR_PAIR_DIVIDER) | curses.A_DIM,
+        "window_label": curses.color_pair(COLOR_PAIR_WINDOW) | curses.A_DIM,
+        "title": curses.color_pair(COLOR_PAIR_PANE) | curses.A_BOLD,
+        "muted": curses.color_pair(COLOR_PAIR_MUTED) | curses.A_DIM,
+        "preview": curses.color_pair(COLOR_PAIR_PREVIEW),
+        "pill": curses.color_pair(COLOR_PAIR_PILL) | curses.A_BOLD,
+    }
+    _selected_role_attrs.update(
+        {
+            "base": curses.color_pair(COLOR_PAIR_SELECTED),
+            "title": curses.color_pair(COLOR_PAIR_SELECTED) | curses.A_BOLD,
+            "muted": curses.color_pair(COLOR_PAIR_SELECTED_MUTED),
+            "preview": curses.color_pair(COLOR_PAIR_SELECTED_MUTED),
+            "pill": curses.color_pair(COLOR_PAIR_SELECTED_PILL) | curses.A_BOLD,
+        }
+    )
+
     return (
-        curses.A_BOLD,
+        curses.color_pair(COLOR_PAIR_SELECTED),
         curses.color_pair(COLOR_PAIR_SESSION),
         curses.color_pair(COLOR_PAIR_WINDOW),
         curses.color_pair(COLOR_PAIR_PANE),
@@ -542,38 +615,44 @@ def init_sidebar_colors() -> tuple[int, int, int, int]:
 
 
 def _line_attr(kind: str, is_selected: bool, is_match: bool, active_attr: int, session_attr: int, window_attr: int, pane_attr: int) -> int:
-    match_attr = getattr(curses, "A_ITALIC", curses.A_UNDERLINE) if is_match else 0
     if is_selected:
-        return active_attr | match_attr
+        return active_attr
     if kind == "session":
-        return session_attr | match_attr
+        return session_attr
     if kind == "window":
-        return window_attr | match_attr
-    return pane_attr | match_attr
+        return window_attr
+    return pane_attr
 
 
-def _render_segments(stdscr, y: int, width: int, segments: list[tuple[str, str]], base_attr: int) -> None:
+def _match_attr(is_match: bool) -> int:
+    return getattr(curses, "A_ITALIC", curses.A_UNDERLINE) if is_match else 0
+
+
+def _segment_attr(role: str, base_attr: int, selected: bool, is_match: bool) -> int:
+    match_attr = _match_attr(is_match)
+    if selected:
+        return (_selected_role_attrs.get(role) or _selected_role_attrs.get("base") or base_attr) | match_attr
+    if role.startswith("badge:"):
+        return _badge_attrs.get(role.split(":", 1)[1], base_attr | curses.A_BOLD) | match_attr
+    if role in _role_attrs:
+        return _role_attrs[role] | match_attr
+    return base_attr | match_attr
+
+
+def _render_segments(
+    stdscr,
+    y: int,
+    width: int,
+    segments: list[tuple[str, str]],
+    base_attr: int,
+    selected: bool,
+    is_match: bool,
+) -> None:
     x = 0
     for text, role in segments:
         if x >= width:
             break
-        attr = base_attr
-        if role == "pill":
-            attr |= curses.A_BOLD
-        elif role == "section":
-            attr = base_attr | curses.A_BOLD
-        elif role == "divider":
-            attr = base_attr | curses.A_DIM
-        elif role == "window_label":
-            attr = base_attr | curses.A_DIM
-        elif role == "title":
-            attr = base_attr | curses.A_BOLD
-        elif role == "muted":
-            attr = base_attr | curses.A_DIM
-        elif role == "preview":
-            attr = base_attr | curses.A_DIM
-        elif role.startswith("badge:"):
-            attr = _badge_attrs.get(role.split(":", 1)[1], base_attr)
+        attr = _segment_attr(role, base_attr, selected, is_match)
         remaining = width - x
         stdscr.addnstr(y, x, text, remaining, attr)
         x += min(len(text), remaining)
@@ -603,7 +682,7 @@ def render_screen(
         row_idx = line["row_index"]
         is_match = bool(search_matches) and row_idx in search_matches
         base_attr = _line_attr(line["kind"], line["selected"], is_match, active_attr, session_attr, window_attr, pane_attr)
-        _render_segments(stdscr, y, width, line["segments"], base_attr)
+        _render_segments(stdscr, y, width, line["segments"], base_attr, line["selected"], is_match)
     if has_search_bar:
         prompt = f"/{search_query}"
         prompt_line = curses.LINES - 1

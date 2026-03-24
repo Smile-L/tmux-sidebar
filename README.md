@@ -79,11 +79,11 @@ Then `tmux source-file ~/.tmux.conf`.
 
 ### Toggle
 
-`<prefix> t` opens or closes the sidebar.
+`<prefix> T` opens or closes the sidebar.
 
 ### Focus
 
-`<prefix> T` toggles focus between the sidebar and your main pane:
+`<prefix> t` toggles focus between the sidebar and your main pane:
 
 - **In sidebar** — returns to the pane you were in before
 - **Sidebar open** — moves focus into the sidebar
@@ -195,26 +195,31 @@ set -g @tmux_sidebar_badge_error        "❌"   # default: ❌
 
 ### Colors
 
-Override the colors used for each element type in the tree:
+The default sidebar now uses a cooler, more structured palette with a deep blue
+selected state for stronger focus. Override the core tree colors like this:
 
 ```tmux
-set -g @tmux_sidebar_color_session "#1a2f4e"
-set -g @tmux_sidebar_color_window  "#4a5568"
-set -g @tmux_sidebar_color_pane    "#a0aec0"
+set -g @tmux_sidebar_color_session     "#5b8bd9"
+set -g @tmux_sidebar_color_window      "#8fa2ba"
+set -g @tmux_sidebar_color_pane        "#d6dfeb"
+set -g @tmux_sidebar_color_selected_bg "#153d73"
+set -g @tmux_sidebar_color_selected_fg "#f3f8ff"
+set -g @tmux_sidebar_color_section     "#305ea8"
+set -g @tmux_sidebar_color_muted       "#7d91aa"
 ```
 
-Values are hex color codes. When not set, colors are derived from your tmux
-theme — session color falls back to `pane-active-border-style` foreground,
-window color to `pane-border-style` foreground, and pane color to
-`status-style` foreground.
+Values are hex color codes. If you want to tune the status accents too, the
+sidebar also accepts `@tmux_sidebar_color_badge_running`,
+`@tmux_sidebar_color_badge_needs_input`, `@tmux_sidebar_color_badge_done`,
+`@tmux_sidebar_color_badge_done_unread`, and `@tmux_sidebar_color_badge_error`.
 
 ### Key overrides
 
 Override the default tmux keybindings for toggle and focus:
 
 ```tmux
-set -g @tmux_sidebar_toggle_key  b    # default: t
-set -g @tmux_sidebar_focus_key   B    # default: T
+set -g @tmux_sidebar_toggle_key  b    # default: T
+set -g @tmux_sidebar_focus_key   B    # default: t
 ```
 
 ### Quick reference
@@ -238,8 +243,12 @@ set -g @tmux_sidebar_focus_key   B    # default: T
 | `@tmux_sidebar_color_session`        |    —    | Session name color (hex)         |
 | `@tmux_sidebar_color_window`         |    —    | Window name color (hex)          |
 | `@tmux_sidebar_color_pane`           |    —    | Pane name color (hex)            |
-| `@tmux_sidebar_toggle_key`           |   `t`   | Tmux key to toggle sidebar       |
-| `@tmux_sidebar_focus_key`            |   `T`   | Tmux key to focus sidebar        |
+| `@tmux_sidebar_color_selected_bg`    |    —    | Selected row background (hex)    |
+| `@tmux_sidebar_color_selected_fg`    |    —    | Selected row foreground (hex)    |
+| `@tmux_sidebar_color_section`        |    —    | Session header accent (hex)      |
+| `@tmux_sidebar_color_muted`          |    —    | Metadata and preview text (hex)  |
+| `@tmux_sidebar_toggle_key`           |   `T`   | Tmux key to toggle sidebar       |
+| `@tmux_sidebar_focus_key`            |   `t`   | Tmux key to focus sidebar        |
 
 | Environment variable     | Description                                                                                    |
 | ------------------------ | ---------------------------------------------------------------------------------------------- |
