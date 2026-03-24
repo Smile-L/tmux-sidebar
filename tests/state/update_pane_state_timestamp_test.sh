@@ -18,4 +18,4 @@ bash scripts/features/state/update-pane-state.sh \
   --status running \
   --updated-at 100
 
-assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%7.json" '"status":"done"'
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%7.json" '"status":"done-unread"'

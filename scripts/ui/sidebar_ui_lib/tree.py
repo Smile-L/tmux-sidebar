@@ -5,7 +5,7 @@ import subprocess
 from collections import OrderedDict
 
 from .core import STATE_DIR, SIDEBAR_TITLES, configured_sidebar_width, run_tmux, tmux_option
-from .status import badge_for_status, effective_pane_status, pane_display_label, window_display_name
+from .status import badge_for_status, effective_pane_status, pane_display_label, titlecase_agent_name, window_display_name
 
 
 def ordered_sessions(sessions: OrderedDict[str, dict]) -> list[dict]:
@@ -34,7 +34,7 @@ def load_tree() -> list[dict]:
         "list-panes",
         "-a",
         "-F",
-        "#{session_name}|#{window_id}|#{window_name}|#{pane_id}|#{pane_current_command}|#{pane_title}|#{pane_active}",
+        "#{session_name}|#{window_id}|#{window_name}|#{pane_id}|#{pane_current_command}|#{pane_title}|#{pane_active}|#{pane_current_path}",
     )
 
     sessions: OrderedDict[str, dict] = OrderedDict()
@@ -44,7 +44,12 @@ def load_tree() -> list[dict]:
     for line in raw.splitlines():
         if not line:
             continue
-        session_name, window_id, window_name, pane_id, pane_label, pane_title, pane_active = line.split("|", 6)
+        parts = line.split("|", 7)
+        if len(parts) == 8:
+            session_name, window_id, window_name, pane_id, pane_label, pane_title, pane_active, pane_path = parts
+        else:
+            session_name, window_id, window_name, pane_id, pane_label, pane_title, pane_active = parts
+            pane_path = ""
         live_panes.add(pane_id)
         if pane_active == "1":
             active_panes.add(pane_id)
@@ -58,6 +63,7 @@ def load_tree() -> list[dict]:
                 "id": pane_id,
                 "label": pane_label,
                 "title": pane_title,
+                "path": pane_path,
                 "session": session_name,
                 "window": window_id,
                 "active": pane_id in active_panes,
@@ -95,15 +101,18 @@ def load_tree() -> list[dict]:
 
     rows: list[dict] = []
     session_items = ordered_sessions(sessions)
-    for session_index, session in enumerate(session_items):
-        session_last = session_index == len(session_items) - 1
-        session_prefix = "   " if session_last else "│  "
-        rows.append({"kind": "session", "session": session["name"], "text": f"{'└─' if session_last else '├─'} {session['name']}"})
+    for session in session_items:
+        rows.append(
+            {
+                "kind": "session",
+                "session": session["name"],
+                "text": session["name"],
+                "search_text": session["name"],
+            }
+        )
 
         windows = list(session["windows"].values())
-        for window_index, window in enumerate(windows):
-            window_last = window_index == len(windows) - 1
-            window_prefix = session_prefix + ("   " if window_last else "│  ")
+        for window in windows:
             display_name = window_display_name(window["name"], window["panes"], pane_states)
             visible_panes = window["panes"]
             if hide_panes:
@@ -117,18 +126,19 @@ def load_tree() -> list[dict]:
                 "kind": "window",
                 "session": session["name"],
                 "window": window["id"],
-                "text": f"{session_prefix}{'└─' if window_last else '├─'} {display_name}",
+                "text": display_name,
+                "window_name": display_name,
+                "search_text": " ".join(part for part in (session["name"], display_name) if part),
             }
             if hide_panes and not visible_panes:
                 window_row["pane_id"] = window["id"]
             rows.append(window_row)
-            for pane_index, pane in enumerate(visible_panes):
-                pane_last = pane_index == len(visible_panes) - 1
+            for pane in visible_panes:
                 pane_state = pane_states.get(pane["id"], {})
-                badge = badge_for_status(effective_pane_status(pane["id"], pane["label"], pane["title"], pane_state))
-                label = pane_display_label(pane["label"], pane["title"], pane_state)
-                if badge:
-                    label = f"{label} {badge}"
+                status = effective_pane_status(pane["id"], pane["label"], pane["title"], pane_state)
+                badge = badge_for_status(status)
+                meta = f"{pane['session']} · {display_name}"
+                preview_message = str(pane_state.get("message", "")).strip()
                 rows.append(
                     {
                         "kind": "pane",
@@ -136,7 +146,19 @@ def load_tree() -> list[dict]:
                         "session": pane["session"],
                         "window": pane["window"],
                         "active": pane["active"],
-                        "text": f"{window_prefix}{'└─' if pane_last else '├─'} {label}",
+                        "window_name": display_name,
+                        "label": pane_display_label(pane["label"], pane["title"], pane_state),
+                        "agent_name": titlecase_agent_name(pane["label"], pane["title"], pane_state),
+                        "status": status,
+                        "meta": meta,
+                        "path": pane.get("path", ""),
+                        "preview_message": preview_message,
+                        "pane_title": pane["title"],
+                        "pane_command": pane["label"],
+                        "text": pane_display_label(pane["label"], pane["title"], pane_state) + (f" {badge}" if badge else ""),
+                        "search_text": " ".join(
+                            part for part in (pane["session"], display_name, pane["label"], pane["title"], pane.get("path", ""), preview_message) if part
+                        ),
                     }
                 )
     return rows
@@ -195,7 +217,10 @@ def find_search_matches(rows: list[dict], query: str) -> set[int]:
     if not query:
         return set()
     query_lower = query.lower()
-    return {i for i, row in enumerate(rows) if query_lower in row["text"].lower()}
+    return {
+        i for i, row in enumerate(rows)
+        if query_lower in str(row.get("search_text", row["text"])).lower()
+    }
 
 
 def next_search_match(rows: list[dict], selected_pane_id: str, search_matches: set[int], direction: int = 1) -> str:

@@ -116,10 +116,13 @@ All options are set with `set -g` in your tmux config.
 ### Sidebar width
 
 ```tmux
-set -g @tmux_sidebar_width 30      # default: 25
+set -g @tmux_sidebar_width 60      # default: 50
 ```
 
-The env var `TMUX_SIDEBAR_WIDTH` takes precedence if set.
+The env var `TMUX_SIDEBAR_WIDTH` takes precedence if set. The default is wider
+now so the panel layout, path row, and two-line summaries have enough room to
+breathe, and session headers render with a full-width divider for clearer
+grouping.
 
 ### Focus on open
 
@@ -218,7 +221,7 @@ set -g @tmux_sidebar_focus_key   B    # default: T
 
 | Option                               | Default | Description                      |
 | ------------------------------------ | :-----: | -------------------------------- |
-| `@tmux_sidebar_width`                |  `25`   | Sidebar column width             |
+| `@tmux_sidebar_width`                |  `50`   | Sidebar column width             |
 | `@tmux_sidebar_focus_on_open`        |   `1`   | Focus sidebar when toggled open  |
 | `@tmux_sidebar_session_order`        |    —    | Comma-separated session ordering |
 | `@tmux_sidebar_add_window_shortcut`  |  `aw`   | Shortcut to add a window         |

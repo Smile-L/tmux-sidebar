@@ -8,35 +8,371 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from .core import STATE_DIR, tmux_option
-from .tree import find_selected_row_index, render_rows, truncate_line
+from .core import STATE_DIR, run_tmux, tmux_option
+from .tree import find_selected_row_index, truncate_line
+from .status import badge_for_status
 
 
 COLOR_PAIR_SESSION = 1
 COLOR_PAIR_WINDOW = 2
 COLOR_PAIR_PANE = 3
+COLOR_PAIR_BADGE_RUNNING = 10
+COLOR_PAIR_BADGE_NEEDS_INPUT = 11
+COLOR_PAIR_BADGE_DONE = 12
+COLOR_PAIR_BADGE_DONE_UNREAD = 13
+COLOR_PAIR_BADGE_ERROR = 14
 DEFAULT_COLOR_FG = "ffffff"
 _HEX_COLOR_RE = re.compile(r"#([0-9a-fA-F]{6})")
 _CUBE_VALUES = [0, 95, 135, 175, 215, 255]
 _last_row_map_json = ""
+_badge_attrs: dict[str, int] = {}
+_PROMPT_RE = re.compile(
+    r"^(?:\([^)]*\)\s*)?(?P<user>[A-Za-z0-9._-]+)@(?P<host>[A-Za-z0-9._-]+)\s+(?P<cwd>[^\s]+)\s*[%#$]\s*(?P<cmd>.*)$"
+)
+_LOW_SIGNAL_PATTERNS = [
+    re.compile(r"^now using node v[\w.+-]+", re.IGNORECASE),
+    re.compile(r"^(?:base|venv|conda|python3(?:\.\d+)?)$", re.IGNORECASE),
+    re.compile(r"^[A-Za-z0-9._-]+$"),
+]
+_CODEX_WORKING_RE = re.compile(r"^\s*[•·]\s+working \([^)]*esc to interrupt\)\s*$", re.IGNORECASE)
+_CLAUDE_STATUS_TITLE_RE = re.compile(r"^[●⠂]\s+.*:\s*(done|error|needs-input|running)\s*$", re.IGNORECASE)
 
 
 def _scripts_dir() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _write_row_map(rows: list[dict], scroll_offset: int) -> None:
+def _normalize_preview_line(line: str) -> str:
+    return " ".join(line.strip().split())
+
+
+def _extract_prompt_info(line: str) -> tuple[str, str]:
+    match = _PROMPT_RE.match(line)
+    if not match:
+        return "", ""
+    cwd = match.group("cwd").strip()
+    cmd = match.group("cmd").strip()
+    return cwd, cmd
+
+
+def _panel_type(row: dict) -> str:
+    agent_name = str(row.get("agent_name", "")).lower()
+    label = str(row.get("label", "")).lower()
+    command = str(row.get("pane_command", "")).lower()
+    if agent_name == "codex" or label == "codex" or command.startswith("codex"):
+        return "codex"
+    if agent_name == "claude" or label == "claude" or command.startswith("claude"):
+        return "claude"
+    if command in {"bash", "zsh", "fish", "sh"} or label in {"bash", "zsh", "fish", "sh"}:
+        return "shell"
+    return "generic"
+
+
+def _line_score(line: str, row: dict) -> int:
+    score = len(line)
+    lowered = line.lower()
+    if any(pattern.match(lowered) for pattern in _LOW_SIGNAL_PATTERNS):
+        score -= 30
+    if line == row.get("pane_command", "") or line == row.get("label", ""):
+        score -= 20
+    if line == row.get("window_name", ""):
+        score -= 10
+    if "/" in line or "\\" in line:
+        score += 8
+    if " " in line:
+        score += 6
+    if any(token in lowered for token in ("error", "failed", "done", "running", "working", "permission", "approval", "complete")):
+        score += 10
+    if len(line) < 6:
+        score -= 12
+    return score
+
+
+def _captured_candidates(pane_id: str) -> tuple[list[str], str, list[str]]:
+    if not pane_id:
+        return [], "", []
+    try:
+        capture = run_tmux("capture-pane", "-pt", pane_id)
+    except Exception:
+        return [], "", []
+    raw_lines = [_normalize_preview_line(line) for line in capture.splitlines()]
+    prompt_cwd = ""
+    commands: list[str] = []
+    content: list[str] = []
+    for line in raw_lines:
+        if not line:
+            continue
+        cwd, cmd = _extract_prompt_info(line)
+        if cwd and not prompt_cwd:
+            prompt_cwd = cwd
+        if cmd:
+            commands.append(cmd)
+            continue
+        if cwd:
+            continue
+        content.append(line)
+    return raw_lines, prompt_cwd, list(dict.fromkeys(commands + content))
+
+
+def _ranked_unique_candidates(candidates: list[str], row: dict, limit: int = 3) -> list[str]:
+    unique_candidates: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = _normalize_preview_line(candidate)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_candidates.append(normalized)
+    unique_candidates.sort(key=lambda line: (_line_score(line, row), len(line)), reverse=True)
+    return unique_candidates[:limit]
+
+
+def _shell_preview_lines(row: dict) -> list[str]:
+    _, prompt_cwd, candidates = _captured_candidates(row.get("pane_id", ""))
+    commands: list[str] = []
+    output_lines: list[str] = []
+    for candidate in candidates:
+        cwd, cmd = _extract_prompt_info(candidate)
+        if cmd:
+            commands.append(cmd)
+            continue
+        if cwd:
+            continue
+        output_lines.append(candidate)
+    ranked_output = _ranked_unique_candidates(list(reversed(output_lines)), row, limit=2)
+    result: list[str] = []
+    if commands:
+        result.append(commands[-1])
+    result.extend(ranked_output)
+    if prompt_cwd and not result:
+        result.append(prompt_cwd)
+    if prompt_cwd and prompt_cwd not in result:
+        result.append(prompt_cwd)
+    return result[:2]
+
+
+def _codex_preview_lines(row: dict) -> list[str]:
+    _, _, candidates = _captured_candidates(row.get("pane_id", ""))
+    preferred: list[str] = []
+    fallback: list[str] = []
+    for candidate in candidates:
+        lowered = candidate.lower()
+        if _CODEX_WORKING_RE.match(candidate):
+            fallback.append("Working")
+            continue
+        if any(token in lowered for token in ("implement", "refactor", "fix", "update", "add ", "search", "running", "complete", "error", "approval", "permission")):
+            preferred.append(candidate)
+        else:
+            fallback.append(candidate)
+    result = _ranked_unique_candidates(list(reversed(preferred)), row, limit=2)
+    if len(result) < 2:
+        for candidate in _ranked_unique_candidates(list(reversed(fallback)), row, limit=3):
+            if candidate not in result:
+                result.append(candidate)
+            if len(result) >= 2:
+                break
+    return result[:2]
+
+
+def _claude_preview_lines(row: dict) -> list[str]:
+    _, _, candidates = _captured_candidates(row.get("pane_id", ""))
+    preferred: list[str] = []
+    fallback: list[str] = []
+    for candidate in candidates:
+        if _CLAUDE_STATUS_TITLE_RE.match(candidate):
+            continue
+        lowered = candidate.lower()
+        if any(token in lowered for token in ("permission", "approval", "writing", "updating", "analy", "implement", "finished", "error", "tool")):
+            preferred.append(candidate)
+        else:
+            fallback.append(candidate)
+    result = _ranked_unique_candidates(list(reversed(preferred)), row, limit=2)
+    if len(result) < 2:
+        for candidate in _ranked_unique_candidates(list(reversed(fallback)), row, limit=3):
+            if candidate not in result:
+                result.append(candidate)
+            if len(result) >= 2:
+                break
+    return result[:2]
+
+
+def _generic_preview_lines(row: dict) -> list[str]:
+    _, prompt_cwd, candidates = _captured_candidates(row.get("pane_id", ""))
+    result = _ranked_unique_candidates(list(reversed(candidates)), row, limit=2)
+    if prompt_cwd and len(result) < 2 and prompt_cwd not in result:
+        result.append(prompt_cwd)
+    return result[:2]
+
+
+def _panel_specific_preview_lines(row: dict) -> list[str]:
+    panel_type = _panel_type(row)
+    if panel_type == "codex":
+        return _codex_preview_lines(row)
+    if panel_type == "claude":
+        return _claude_preview_lines(row)
+    if panel_type == "shell":
+        return _shell_preview_lines(row)
+    return _generic_preview_lines(row)
+
+
+def _selected_preview_lines(row: dict) -> list[str]:
+    snippets: list[str] = []
+    seen: set[str] = set()
+    meta_hint = row.get("path", "") or row.get("meta", "")
+    for candidate in (
+        row.get("preview_message", ""),
+        *_panel_specific_preview_lines(row),
+        row.get("pane_title", ""),
+        meta_hint,
+    ):
+        normalized = _normalize_preview_line(str(candidate))
+        if not normalized:
+            continue
+        cwd, cmd = _extract_prompt_info(normalized)
+        if cmd:
+            normalized = cmd
+        elif cwd:
+            normalized = cwd
+        if normalized == row.get("window_name", "") or normalized == row.get("label", ""):
+            continue
+        if any(pattern.match(normalized.lower()) for pattern in _LOW_SIGNAL_PATTERNS):
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        snippets.append(normalized)
+        if len(snippets) >= 2:
+            break
+    while len(snippets) < 2:
+        snippets.append("")
+    return snippets
+
+
+def _session_header_segments(title: str, max_width: int | None = None) -> tuple[list[tuple[str, str]], str]:
+    normalized_title = str(title).upper()
+    prefix = "  "
+    title_block = f"{normalized_title} "
+    divider = "━"
+    if max_width is None:
+        divider_width = 6
+    else:
+        divider_width = max(2, max_width - len(prefix) - len(title_block))
+    divider_block = divider * divider_width
+    return (
+        [
+            (prefix, "base"),
+            (title_block, "section"),
+            (divider_block, "divider"),
+        ],
+        truncate_line(prefix + title_block + divider_block, max_width),
+    )
+
+
+def build_visual_lines(rows: list[dict], selected_pane_id: str, max_width: int | None = None) -> list[dict]:
+    visual_lines: list[dict] = []
+    selected_row = find_selected_row_index(rows, selected_pane_id)
+    for row_index, row in enumerate(rows):
+        is_selected = selected_row is not None and row_index == selected_row
+        prefix = "▶ " if is_selected else "  "
+        if row["kind"] == "session":
+            segments, text = _session_header_segments(str(row["text"]), max_width)
+            visual_lines.append(
+                {
+                    "row_index": row_index,
+                    "kind": row["kind"],
+                    "selected": False,
+                    "segments": segments,
+                    "text": text,
+                }
+            )
+            continue
+        if row["kind"] == "window":
+            visual_lines.append(
+                {
+                    "row_index": row_index,
+                    "kind": row["kind"],
+                    "selected": is_selected,
+                    "segments": [(prefix + str(row["text"]), "window_label")],
+                    "text": truncate_line(prefix + str(row["text"]), max_width),
+                }
+            )
+            continue
+        if row["kind"] == "pane":
+            badge = badge_for_status(row.get("status", ""))
+            base_segments = [(prefix, "base")]
+            if row.get("agent_name"):
+                base_segments.append((f"[{row['agent_name']}] ", "pill"))
+            title_label = row.get("window_name") or row.get("label") or row.get("pane_command") or row.get("text") or ""
+            base_segments.append((title_label, "title"))
+            if badge:
+                base_segments.append((f" [{badge}]", f"badge:{row.get('status', '')}"))
+            visual_lines.append(
+                {
+                    "row_index": row_index,
+                    "kind": row["kind"],
+                    "selected": is_selected,
+                    "segments": base_segments,
+                    "text": truncate_line(prefix + row["text"], max_width),
+                }
+            )
+            if is_selected:
+                meta_bits = []
+                if row.get("path"):
+                    meta_bits.append(str(row["path"]))
+                else:
+                    meta_bits.append(row.get("session", ""))
+                    label = row.get("label", "")
+                    if label and label != title_label:
+                        meta_bits.append(label)
+                meta_text = " · ".join(bit for bit in meta_bits if bit)
+                indent = "   "
+                visual_lines.append(
+                    {
+                        "row_index": row_index,
+                        "kind": row["kind"],
+                        "selected": is_selected,
+                        "segments": [(indent + meta_text, "muted")],
+                        "text": truncate_line(indent + meta_text, max_width),
+                    }
+                )
+                for preview in _selected_preview_lines(row):
+                    visual_lines.append(
+                        {
+                            "row_index": row_index,
+                            "kind": row["kind"],
+                            "selected": is_selected,
+                            "segments": [(indent + preview, "preview")],
+                            "text": truncate_line(indent + preview, max_width),
+                        }
+                    )
+            continue
+    return visual_lines
+
+
+def row_visual_span(visual_lines: list[dict], row_index: int | None) -> tuple[int, int]:
+    if row_index is None:
+        return 0, 0
+    indices = [index for index, line in enumerate(visual_lines) if line["row_index"] == row_index]
+    if not indices:
+        return 0, 0
+    return indices[0], indices[-1] + 1
+
+
+def _write_row_map(visual_lines: list[dict], scroll_offset: int) -> None:
     global _last_row_map_json
     sidebar_pane = os.environ.get("TMUX_PANE", "")
     if not sidebar_pane:
         return
     data = {"scroll_offset": scroll_offset, "rows": []}
-    for row in rows:
-        entry: dict = {"kind": row["kind"], "session": row.get("session", "")}
-        if "window" in row:
-            entry["window"] = row["window"]
-        if "pane_id" in row:
-            entry["pane_id"] = row["pane_id"]
+    for line in visual_lines:
+        entry: dict = {"kind": line["kind"]}
+        row = line.get("row", {})
+        if row:
+            entry["session"] = row.get("session", "")
+            if "window" in row:
+                entry["window"] = row["window"]
+            if "pane_id" in row:
+                entry["pane_id"] = row["pane_id"]
         data["rows"].append(entry)
     json_str = json.dumps(data)
     if json_str == _last_row_map_json:
@@ -48,7 +384,6 @@ def _write_row_map(rows: list[dict], scroll_offset: int) -> None:
         tmp.rename(map_path)
         _last_row_map_json = json_str
     except OSError:
-        # Context menus are optional; keep the sidebar interactive if state files are unavailable.
         return
 
 
@@ -153,6 +488,8 @@ def _parse_border_format_colors() -> dict[str, str]:
 
 
 def init_sidebar_colors() -> tuple[int, int, int, int]:
+    global _badge_attrs
+    _badge_attrs = {}
     try:
         if curses.COLORS < 256:
             return curses.A_BOLD, 0, 0, 0
@@ -179,6 +516,23 @@ def init_sidebar_colors() -> tuple[int, int, int, int]:
     curses.init_pair(COLOR_PAIR_SESSION, _define_color(240, session_hex), -1)
     curses.init_pair(COLOR_PAIR_WINDOW, _define_color(241, window_hex), -1)
     curses.init_pair(COLOR_PAIR_PANE, _define_color(242, pane_hex), -1)
+    badge_colors = {
+        "running": "d4a72c",
+        "needs-input": "d97706",
+        "done": "65a30d",
+        "done-unread": "ca8a04",
+        "error": "dc2626",
+    }
+    badge_pairs = {
+        "running": COLOR_PAIR_BADGE_RUNNING,
+        "needs-input": COLOR_PAIR_BADGE_NEEDS_INPUT,
+        "done": COLOR_PAIR_BADGE_DONE,
+        "done-unread": COLOR_PAIR_BADGE_DONE_UNREAD,
+        "error": COLOR_PAIR_BADGE_ERROR,
+    }
+    for status, pair_id in badge_pairs.items():
+        curses.init_pair(pair_id, _define_color(242 + pair_id, badge_colors[status]), -1)
+        _badge_attrs[status] = curses.color_pair(pair_id) | curses.A_BOLD
     return (
         curses.A_BOLD,
         curses.color_pair(COLOR_PAIR_SESSION),
@@ -187,15 +541,48 @@ def init_sidebar_colors() -> tuple[int, int, int, int]:
     )
 
 
-def _label_start(line: str) -> int:
-    pos = line.rfind("─ ")
-    return pos + 2 if pos >= 0 else len(line)
+def _line_attr(kind: str, is_selected: bool, is_match: bool, active_attr: int, session_attr: int, window_attr: int, pane_attr: int) -> int:
+    match_attr = getattr(curses, "A_ITALIC", curses.A_UNDERLINE) if is_match else 0
+    if is_selected:
+        return active_attr | match_attr
+    if kind == "session":
+        return session_attr | match_attr
+    if kind == "window":
+        return window_attr | match_attr
+    return pane_attr | match_attr
+
+
+def _render_segments(stdscr, y: int, width: int, segments: list[tuple[str, str]], base_attr: int) -> None:
+    x = 0
+    for text, role in segments:
+        if x >= width:
+            break
+        attr = base_attr
+        if role == "pill":
+            attr |= curses.A_BOLD
+        elif role == "section":
+            attr = base_attr | curses.A_BOLD
+        elif role == "divider":
+            attr = base_attr | curses.A_DIM
+        elif role == "window_label":
+            attr = base_attr | curses.A_DIM
+        elif role == "title":
+            attr = base_attr | curses.A_BOLD
+        elif role == "muted":
+            attr = base_attr | curses.A_DIM
+        elif role == "preview":
+            attr = base_attr | curses.A_DIM
+        elif role.startswith("badge:"):
+            attr = _badge_attrs.get(role.split(":", 1)[1], base_attr)
+        remaining = width - x
+        stdscr.addnstr(y, x, text, remaining, attr)
+        x += min(len(text), remaining)
 
 
 def render_screen(
     stdscr,
     rows: list[dict],
-    selected_pane_id: str,
+    visual_lines: list[dict],
     scroll_offset: int = 0,
     search_query: str = "",
     search_matches: set[int] | None = None,
@@ -209,32 +596,14 @@ def render_screen(
     has_search_bar = search_mode or bool(search_query)
     visible_lines = curses.LINES - (1 if has_search_bar else 0)
     stdscr.erase()
-    rendered = render_rows(rows, selected_pane_id, width)
-    selected_row = find_selected_row_index(rows, selected_pane_id)
-    match_attr = getattr(curses, "A_ITALIC", curses.A_UNDERLINE)
-    visible = rendered[scroll_offset:scroll_offset + visible_lines]
+    visible = visual_lines[scroll_offset:scroll_offset + visible_lines]
     for y, line in enumerate(visible):
         if y >= visible_lines:
             break
-        row_idx = y + scroll_offset
-        row = rows[row_idx] if row_idx < len(rows) else None
-        kind = row["kind"] if row else None
-        is_selected = selected_row is not None and row_idx == selected_row
+        row_idx = line["row_index"]
         is_match = bool(search_matches) and row_idx in search_matches
-        label_start = _label_start(line)
-        stdscr.addnstr(y, 0, line[:label_start], width)
-        remaining = width - label_start
-        if remaining > 0 and label_start < len(line):
-            label = line[label_start:]
-            if is_selected:
-                attr = active_attr | (match_attr if is_match else 0)
-            elif kind == "session":
-                attr = session_attr | (match_attr if is_match else 0)
-            elif kind == "window":
-                attr = window_attr | (match_attr if is_match else 0)
-            else:
-                attr = pane_attr | (match_attr if is_match else 0)
-            stdscr.addnstr(y, label_start, label, remaining, attr)
+        base_attr = _line_attr(line["kind"], line["selected"], is_match, active_attr, session_attr, window_attr, pane_attr)
+        _render_segments(stdscr, y, width, line["segments"], base_attr)
     if has_search_bar:
         prompt = f"/{search_query}"
         prompt_line = curses.LINES - 1

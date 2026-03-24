@@ -28,6 +28,14 @@ assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%8.json" '"app":"codex"'
 assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%8.json" '"status":"running"'
 
 bash scripts/features/state/update-pane-state.sh \
+  --pane "%8" \
+  --app codex \
+  --status done \
+  --message "Finished in background"
+
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%8.json" '"status":"done-unread"'
+
+bash scripts/features/state/update-pane-state.sh \
   --pane "" \
   --app codex \
   --status done \

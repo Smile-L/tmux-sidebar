@@ -23,12 +23,12 @@ bash scripts/features/state/clear-pane-state.sh "%8"
 assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%8.json" '"status":"running"'
 
 cat > "$TMUX_SIDEBAR_STATE_DIR/pane-%9.json" <<'EOF'
-{"pane_id":"%9","app":"codex","status":"done","updated_at":100}
+{"pane_id":"%9","app":"codex","status":"done-unread","updated_at":100}
 EOF
 
 bash scripts/features/state/clear-pane-state.sh "%9"
 
-assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%9.json" '"status":"idle"'
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%9.json" '"status":"done"'
 
 cat > "$TMUX_SIDEBAR_STATE_DIR/pane-%10.json" <<'EOF'
 {"pane_id":"%10","app":"codex","status":"running","updated_at":100}
@@ -37,3 +37,11 @@ EOF
 bash scripts/features/state/clear-pane-state.sh "%10"
 
 assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%10.json" '"status":"running"'
+
+cat > "$TMUX_SIDEBAR_STATE_DIR/pane-%11.json" <<'EOF'
+{"pane_id":"%11","app":"codex","status":"done","updated_at":100}
+EOF
+
+bash scripts/features/state/clear-pane-state.sh "%11"
+
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%11.json" '"status":"done"'

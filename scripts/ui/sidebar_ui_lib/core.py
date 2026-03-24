@@ -12,7 +12,7 @@ STATE_DIR = Path(os.environ.get(
     "TMUX_SIDEBAR_STATE_DIR",
     os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state")) + "/tmux-sidebar",
 ))
-DEFAULT_SIDEBAR_WIDTH = 25
+DEFAULT_SIDEBAR_WIDTH = 50
 DEFAULT_SHORTCUTS = {
     "add_window": "aw",
     "add_session": "as",

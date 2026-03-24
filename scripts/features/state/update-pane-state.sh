@@ -67,18 +67,25 @@ window_id=""
 window_name=""
 pane_title=""
 pane_current_command=""
+pane_active="0"
 
 metadata="$(tmux display-message -p -t "$pane_id" '#{session_name}|#{window_id}|#{window_name}|#{pane_title}|#{pane_current_command}' 2>/dev/null || true)"
 if [ -n "$metadata" ]; then
   IFS='|' read -r session_name window_id window_name pane_title pane_current_command <<EOF
 $metadata
 EOF
+  pane_active="$(tmux display-message -p -t "$pane_id" '#{pane_active}' 2>/dev/null || printf '0\n')"
 elif [ -f "$state_file" ]; then
   session_name="$(json_get_string "$state_file" "session_name")"
   window_id="$(json_get_string "$state_file" "window_id")"
   window_name="$(json_get_string "$state_file" "window_name")"
   pane_title="$(json_get_string "$state_file" "pane_title")"
   pane_current_command="$(json_get_string "$state_file" "pane_current_command")"
+fi
+
+persisted_status="$status"
+if [ "$status" = "done" ] && [ "$pane_active" != "1" ]; then
+  persisted_status="done-unread"
 fi
 
 tmp_file="$(mktemp "$state_dir/.pane-state.XXXXXX")"
@@ -90,7 +97,7 @@ printf '"window_name":"%s",' "$(json_escape "$window_name")" >> "$tmp_file"
 printf '"pane_title":"%s",' "$(json_escape "$pane_title")" >> "$tmp_file"
 printf '"pane_current_command":"%s",' "$(json_escape "$pane_current_command")" >> "$tmp_file"
 printf '"app":"%s",' "$(json_escape "$app")" >> "$tmp_file"
-printf '"status":"%s",' "$(json_escape "$status")" >> "$tmp_file"
+printf '"status":"%s",' "$(json_escape "$persisted_status")" >> "$tmp_file"
 printf '"message":"%s",' "$(json_escape "$message")" >> "$tmp_file"
 printf '"updated_at":%s' "$updated_at" >> "$tmp_file"
 printf '}\n' >> "$tmp_file"

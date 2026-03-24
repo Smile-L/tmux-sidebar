@@ -22,11 +22,11 @@ printf -v ensure_main_sidebar_cmd 'TMUX_SIDEBAR_TRACE=1 %q %q %q' \
 real_tmux run-shell -b "$ensure_main_sidebar_cmd"
 
 sidebar_pane_id="$(real_tmux_wait_for_sidebar_pane "$main_window_id")"
-capture="$(real_tmux_wait_for_capture "$sidebar_pane_id" 'work')"
+capture="$(real_tmux_wait_for_capture "$sidebar_pane_id" 'WORK')"
 
-assert_contains "$capture" 'work'
+assert_contains "$capture" 'WORK ━'
 assert_contains "$capture" 'editor'
-assert_contains "$capture" 'ops'
+assert_contains "$capture" 'OPS ━'
 assert_contains "$capture" 'logs'
 
 rendered="$(real_tmux_run_shell_capture "$REPO_ROOT/scripts/features/sidebar/render-sidebar.sh")"
@@ -44,9 +44,9 @@ real_tmux run-shell -b "$ensure_build_sidebar_cmd"
 build_sidebar_pane_id="$(real_tmux_wait_for_sidebar_pane "$build_window_id")"
 build_capture="$(real_tmux_wait_for_capture "$build_sidebar_pane_id" 'build')"
 
-assert_contains "$build_capture" 'work'
+assert_contains "$build_capture" 'WORK ━'
 assert_contains "$build_capture" 'build'
-assert_contains "$build_capture" 'ops'
+assert_contains "$build_capture" 'OPS ━'
 
 real_tmux select-pane -t "$sidebar_pane_id"
 client_log="$TEST_TMP/client.log"

@@ -57,7 +57,13 @@ class FakeScreen:
         self.lines = {}
 
     def addnstr(self, y, x, text, limit, attr=0):
-        self.lines[y] = text[:limit]
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
 
     def refresh(self):
         frame = [self.lines[index] for index in sorted(self.lines)]
@@ -149,7 +155,13 @@ class FakeScreen:
         self.lines = {}
 
     def addnstr(self, y, x, text, limit, attr=0):
-        self.lines[y] = text[:limit]
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
 
     def refresh(self):
         frame = [self.lines[index] for index in sorted(self.lines)]
@@ -215,3 +227,43 @@ PY
 
 assert_contains "$output" '"pane_rows": []'
 assert_contains "$output" '"selected_pane_id": ""'
+
+output="$(python3 - <<'PY'
+import importlib.util
+import json
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("sidebar_ui", Path("scripts/ui/sidebar-ui.py"))
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+rows = [
+    {"kind": "session", "text": "work"},
+    {"kind": "window", "text": "editor"},
+    {
+        "kind": "pane",
+        "pane_id": "%1",
+        "text": "pane one",
+        "window_name": "editor",
+        "label": "pane one",
+        "pane_command": "pane one",
+    },
+    {"kind": "session", "text": "ops"},
+    {"kind": "window", "text": "logs"},
+    {
+        "kind": "pane",
+        "pane_id": "%2",
+        "text": "pane two",
+        "window_name": "logs",
+        "label": "pane two",
+        "pane_command": "pane two",
+    },
+]
+
+visual_lines = module.build_visual_lines(rows, "%1", 32)
+print(json.dumps([line["text"] for line in visual_lines], ensure_ascii=False))
+PY
+)"
+
+assert_contains "$output" 'WORK ━'
+assert_contains "$output" 'OPS ━'

@@ -99,7 +99,13 @@ class FakeScreen:
         self.lines = {}
 
     def addnstr(self, y, x, text, limit, attr=0):
-        self.lines[y] = text[:limit]
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
 
     def refresh(self):
         frame = [self.lines.get(index, "") for index in range(module.curses.LINES)]
@@ -211,7 +217,13 @@ class FakeScreen:
         self.lines = {}
 
     def addnstr(self, y, x, text, limit, attr=0):
-        self.lines[y] = text[:limit]
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
 
     def refresh(self):
         frame = [self.lines.get(index, "") for index in range(module.curses.LINES)]

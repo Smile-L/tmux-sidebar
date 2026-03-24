@@ -30,12 +30,14 @@ DEFAULT_BADGES: dict[str, str] = {
     "running": "⏳",
     "needs-input": "❓",
     "done": "✅",
+    "done-unread": "✓",
     "error": "❌",
 }
 BADGE_OPTIONS: dict[str, str] = {
     "running": "@tmux_sidebar_badge_running",
     "needs-input": "@tmux_sidebar_badge_needs_input",
     "done": "@tmux_sidebar_badge_done",
+    "done-unread": "@tmux_sidebar_badge_done_unread",
     "error": "@tmux_sidebar_badge_error",
 }
 
@@ -57,6 +59,15 @@ def configured_badges() -> dict[str, str]:
 
 def badge_for_status(status: str) -> str:
     return configured_badges().get(status, "")
+
+
+def titlecase_agent_name(command: str, title: str, state: dict | None) -> str:
+    live_app = live_agent_app(command, title, state)
+    if live_app == "codex":
+        return "Codex"
+    if live_app == "claude":
+        return "Claude"
+    return ""
 
 
 def normalize_token(value: str) -> str:
@@ -145,7 +156,7 @@ def effective_pane_status(pane_id: str, command: str, title: str, state: dict | 
 
     status = str((state or {}).get("status", "")).strip().lower()
     if live_app == "codex":
-        if status in ("running", "needs-input", "error", "done"):
+        if status in ("running", "needs-input", "error", "done", "done-unread"):
             return status
         terminal_status = codex_terminal_status(pane_id)
         if terminal_status:
@@ -157,7 +168,7 @@ def effective_pane_status(pane_id: str, command: str, title: str, state: dict | 
     title_status = claude_title_status(title)
     if title_status:
         return title_status
-    if status in ("running", "needs-input", "error", "done"):
+    if status in ("running", "needs-input", "error", "done", "done-unread"):
         return status
     return ""
 

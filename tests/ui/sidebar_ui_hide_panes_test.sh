@@ -81,7 +81,7 @@ assert_contains "$output" '"%1"'
 assert_contains "$output" '"%2"'
 assert_contains "$output" '"%3"'
 
-# Test connector: when only one pane is visible, it should use └─ (last item connector)
+# Test single visible pane stays readable without tree connectors
 printf 'on\n' > "$TEST_TMUX_DATA_DIR/option__tmux_sidebar_hide_panes.txt"
 
 output="$(python3 - <<'PY'
@@ -100,8 +100,8 @@ print(json.dumps({"pane_texts": pane_texts}, ensure_ascii=False, sort_keys=True)
 PY
 )"
 
-# Single visible pane should have └─ connector (last item)
-assert_contains "$output" '└─'
+# Single visible pane should still render the window/pane text
+assert_contains "$output" 'claude'
 
 # Test reconciliation: when the selected pane is hidden, cursor falls back to its window row
 fake_tmux_no_sidebar
@@ -200,7 +200,13 @@ class FakeScreen:
         self.lines = {}
 
     def addnstr(self, y, x, text, limit, attr=0):
-        self.lines[y] = text[:limit]
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
 
     def refresh(self):
         frame = [self.lines.get(index, "") for index in range(module.curses.LINES)]
@@ -293,7 +299,14 @@ class FakeScreen:
     def keypad(self, enabled): pass
     def timeout(self, milliseconds): pass
     def erase(self): self.lines = {}
-    def addnstr(self, y, x, text, limit, attr=0): self.lines[y] = text[:limit]
+    def addnstr(self, y, x, text, limit, attr=0):
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
     def refresh(self):
         self.frames.append([self.lines.get(i, "") for i in range(module.curses.LINES)])
     def getch(self):
@@ -368,7 +381,14 @@ class FakeScreen:
     def keypad(self, enabled): pass
     def timeout(self, milliseconds): pass
     def erase(self): self.lines = {}
-    def addnstr(self, y, x, text, limit, attr=0): self.lines[y] = text[:limit]
+    def addnstr(self, y, x, text, limit, attr=0):
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
     def refresh(self):
         self.frames.append([self.lines.get(i, "") for i in range(module.curses.LINES)])
     def getch(self):
@@ -475,7 +495,14 @@ class FakeScreen:
     def keypad(self, enabled): pass
     def timeout(self, milliseconds): pass
     def erase(self): self.lines = {}
-    def addnstr(self, y, x, text, limit, attr=0): self.lines[y] = text[:limit]
+    def addnstr(self, y, x, text, limit, attr=0):
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
     def refresh(self):
         self.frames.append([self.lines.get(i, "") for i in range(module.curses.LINES)])
     def getch(self):

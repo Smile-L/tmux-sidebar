@@ -24,14 +24,14 @@ fake_tmux_register_main_pane "%9"
 
 output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 
-assert_contains "$output" '├─ work'
-assert_contains "$output" '│     └─ claude'
-assert_contains "$output" '▶       └─ tail'
+assert_contains "$output" 'work'
+assert_contains "$output" 'claude'
+assert_contains "$output" '▶ tail'
 case "$output" in
   *'%99 Sidebar'* ) fail "sidebar pane should be hidden when window has other panes" ;;
 esac
 case "$output" in
-  *'└─ solo'* ) fail "sidebar-only sessions should be hidden from the mirrored tree" ;;
+  *$'\n  SOLO\n'* ) fail "sidebar-only sessions should be hidden from the mirrored tree" ;;
 esac
 
 fake_tmux_set_tree <<'EOF'
@@ -65,9 +65,8 @@ rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
 
 output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 
-window_line="$(printf '%s\n' "$output" | grep -E '^\s+[├└]─' | sed -n '2p')"
-assert_contains "$window_line" 'codex'
-assert_not_contains "$window_line" 'codex-aarch64-apple-darwin'
+assert_contains "$output" 'codex'
+assert_not_contains "$output" 'codex-aarch64-apple-darwin'
 
 fake_tmux_set_tree <<'EOF'
 work|@1|env|%34|env|codex --full-auto|1
@@ -76,9 +75,8 @@ rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
 
 output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 
-window_line="$(printf '%s\n' "$output" | grep -E '^\s+[├└]─' | sed -n '2p')"
-assert_contains "$window_line" 'codex'
-assert_not_contains "$window_line" 'env'
+assert_contains "$output" 'codex'
+assert_not_contains "$output" 'env'
 
 fake_tmux_set_tree <<'EOF'
 work|@1|editor|%4|2.1.76|2.1.76|1
@@ -105,7 +103,7 @@ output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 
 assert_contains "$output" 'zsh'
 case "$output" in
-  *'│     └─ claude'* ) fail "stale claude state should not relabel obvious shell panes" ;;
+  *'▶ claude'* | *$'\n  claude\n'* ) fail "stale claude state should not relabel obvious shell panes" ;;
 esac
 
 fake_tmux_set_tree <<'EOF'
@@ -244,7 +242,7 @@ print(module.configured_sidebar_width())
 PY
 )"
 
-assert_eq "$python_width" "25"
+assert_eq "$python_width" "50"
 
 rm -f "$TEST_TMUX_DATA_DIR/option__tmux_sidebar_width.txt"
 export TMUX_SIDEBAR_WIDTH=''
@@ -261,9 +259,8 @@ EOF
 
 output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 
-window_line="$(printf '%s\n' "$output" | grep -E '^\s+[├└]─' | sed -n '2p')"
-assert_contains "$window_line" 'claude'
-assert_not_contains "$window_line" '2.1.76'
+assert_contains "$output" 'claude'
+assert_not_contains "$output" '2.1.76'
 
 fake_tmux_set_tree <<'EOF'
 work|@1|2.1.76|%23|2.1.76|2.1.76|1
@@ -284,10 +281,8 @@ EOF
 
 output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 
-assert_contains "$output" '└─ myproject'
-case "$output" in
-  *'├─ claude'* | *'└─ claude'*'├─'* ) ;;
-esac
+assert_contains "$output" 'myproject'
+assert_contains "$output" 'claude'
 
 fake_tmux_set_tree <<'EOF'
 work|@1|2.1.76|%25|2.1.76|2.1.76|1
@@ -301,9 +296,8 @@ EOF
 
 output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 
-window_line="$(printf '%s\n' "$output" | grep -E '^\s+[├└]─' | sed -n '2p')"
-assert_contains "$window_line" 'claude'
-assert_not_contains "$window_line" '2.1.76'
+assert_contains "$output" 'claude'
+assert_not_contains "$output" '2.1.76'
 
 fake_tmux_set_tree <<'EOF'
 work|@1|editor|%30|2.1.76|⠂ Claude Code|1

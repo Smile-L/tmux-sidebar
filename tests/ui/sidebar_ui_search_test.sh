@@ -68,7 +68,13 @@ class FakeScreen:
         self.attrs = {}
 
     def addnstr(self, y, x, text, limit, attr=0):
-        self.lines[y] = text[:limit]
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
         self.attrs[y] = attr
 
     def refresh(self):
@@ -105,8 +111,8 @@ print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 PY
 )"
 
-assert_contains "$output" '"close_calls": 1'
-assert_contains "$output" '▶ vim-two'
+assert_contains "$output" "\"close_calls\": 1"
+assert_contains "$output" "▶ vim-two"
 
 # Test 2: Esc during search input cancels search
 output="$(python3 - <<'PY'
@@ -168,7 +174,13 @@ class FakeScreen:
         self.lines = {}
 
     def addnstr(self, y, x, text, limit, attr=0):
-        self.lines[y] = text[:limit]
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
 
     def refresh(self):
         frame = [self.lines.get(i, "") for i in range(max(self.lines.keys()) + 1 if self.lines else 0)]
@@ -192,7 +204,7 @@ print(json.dumps(result))
 PY
 )"
 
-assert_contains "$output" '"close_calls": 1'
+assert_contains "$output" "\"close_calls\": 1"
 
 # Test 3: Esc after confirmed search clears search, second Esc closes
 output="$(python3 - <<'PY'
@@ -255,7 +267,13 @@ class FakeScreen:
         self.lines = {}
 
     def addnstr(self, y, x, text, limit, attr=0):
-        self.lines[y] = text[:limit]
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
 
     def refresh(self):
         frame = [self.lines.get(i, "") for i in range(max(self.lines.keys()) + 1 if self.lines else 0)]
@@ -278,7 +296,7 @@ print(json.dumps(result))
 PY
 )"
 
-assert_contains "$output" '"close_calls": 1'
+assert_contains "$output" "\"close_calls\": 1"
 
 # Test 4: find_search_matches and next_search_match unit tests
 output="$(python3 - <<'PY'
@@ -393,7 +411,7 @@ print(json.dumps({"status": "ok"}))
 PY
 )"
 
-assert_contains "$output" '"status": "ok"'
+assert_contains "$output" "\"status\": \"ok\""
 
 # Test 5: N navigates backward
 output="$(python3 - <<'PY'
@@ -432,11 +450,11 @@ module.prompt_add_window = lambda pane_id: None
 module.prompt_add_session = lambda pane_id: None
 module.focus_main_pane = lambda: None
 
-# /vim Enter, N (previous = wraps to last match = vim-two), q
+# /vim Enter, N (previous = wraps to last match = vim-two since we are on first), q
 keys = [
     ord("/"), ord("v"), ord("i"), ord("m"),
     10,          # confirm
-    ord("N"),    # previous match (wraps to last = vim-two since we're on first)
+    ord("N"),
     ord("q"),
 ]
 
@@ -457,7 +475,13 @@ class FakeScreen:
         self.lines = {}
 
     def addnstr(self, y, x, text, limit, attr=0):
-        self.lines[y] = text[:limit]
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
 
     def refresh(self):
         frame = [self.lines.get(i, "") for i in range(max(self.lines.keys()) + 1 if self.lines else 0)]
@@ -481,8 +505,8 @@ print(json.dumps(result, ensure_ascii=False))
 PY
 )"
 
-assert_contains "$output" '"close_calls": 1'
-assert_contains "$output" '▶ vim-two'
+assert_contains "$output" "\"close_calls\": 1"
+assert_contains "$output" "▶ vim-two"
 
 # Test 6: Backspace during search input removes last character
 output="$(python3 - <<'PY'
@@ -520,12 +544,11 @@ module.prompt_add_window = lambda pane_id: None
 module.prompt_add_session = lambda pane_id: None
 module.focus_main_pane = lambda: None
 
-# /zsx backspace backspace (now /z), Enter to confirm, then q
 keys = [
     ord("/"), ord("z"), ord("s"), ord("x"),
-    127,     # backspace (removes x -> "zs")
-    127,     # backspace (removes s -> "z")
-    10,      # confirm search for "z"
+    127,
+    127,
+    10,
     ord("q"),
 ]
 
@@ -546,7 +569,13 @@ class FakeScreen:
         self.lines = {}
 
     def addnstr(self, y, x, text, limit, attr=0):
-        self.lines[y] = text[:limit]
+        current = self.lines.get(y, "")
+        if len(current) < x:
+            current = current + " " * (x - len(current))
+        insert = text[:limit]
+        prefix = current[:x]
+        suffix = current[x + len(insert):] if len(current) > x + len(insert) else ""
+        self.lines[y] = prefix + insert + suffix
 
     def refresh(self):
         frame = [self.lines.get(i, "") for i in range(max(self.lines.keys()) + 1 if self.lines else 0)]
@@ -570,6 +599,5 @@ print(json.dumps(result, ensure_ascii=False))
 PY
 )"
 
-assert_contains "$output" '"close_calls": 1'
-# "zsh" matches "z", so it should be selected
-assert_contains "$output" '▶ zsh'
+assert_contains "$output" "\"close_calls\": 1"
+assert_contains "$output" "▶ zsh"

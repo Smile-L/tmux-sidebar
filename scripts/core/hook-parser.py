@@ -23,7 +23,13 @@ def parse_claude(payload: str) -> tuple[str, str]:
     data = load_payload(payload)
     event = str(data.get("hook_event_name") or os.environ.get("CLAUDE_HOOK_EVENT_NAME") or "").strip()
     notification_type = str(data.get("notification_type") or "").strip().lower()
-    message = str(data.get("message") or data.get("notification_type") or "").strip()
+    message = str(
+        data.get("transcript_summary")
+        or data.get("summary")
+        or data.get("message")
+        or data.get("notification_type")
+        or ""
+    ).strip()
 
     if event in ("SessionStart", "SessionEnd"):
         status = "idle"

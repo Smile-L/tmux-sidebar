@@ -39,7 +39,14 @@ from sidebar_ui_lib.core import (
     tmux_option,
     toggle_hide_panes,
 )
-from sidebar_ui_lib.render import _run_context_menu, _write_row_map, init_sidebar_colors, render_screen
+from sidebar_ui_lib.render import (
+    _run_context_menu,
+    _write_row_map,
+    build_visual_lines,
+    init_sidebar_colors,
+    render_screen,
+    row_visual_span,
+)
 from sidebar_ui_lib.tree import (
     dump_render,
     ensure_visible,
@@ -49,8 +56,6 @@ from sidebar_ui_lib.tree import (
     next_search_match,
     pane_rows_for,
     reconcile_selected_pane,
-    render_rows,
-    truncate_line,
 )
 
 
@@ -141,6 +146,25 @@ def selected_pane_row(pane_rows: list[dict], selected_pane_id: str) -> dict | No
     return next((row for row in pane_rows if row["pane_id"] == selected_pane_id), pane_rows[0] if pane_rows else None)
 
 
+def ensure_visible_visual(
+    visual_lines: list[dict],
+    row_index: int | None,
+    scroll_offset: int,
+    visible_lines: int,
+    scrolloff: int = 0,
+) -> int:
+    if row_index is None or visible_lines <= 0:
+        return 0
+    row_start, row_end = row_visual_span(visual_lines, row_index)
+    row_height = max(1, row_end - row_start)
+    margin = min(scrolloff, max(0, (visible_lines - row_height) // 2))
+    if row_start < scroll_offset + margin:
+        return max(0, row_start - margin)
+    if row_end > scroll_offset + visible_lines - margin:
+        return max(0, row_end - visible_lines + margin)
+    return scroll_offset
+
+
 def process_keypress(
     key: int,
     selected_pane_id: str,
@@ -215,6 +239,7 @@ def run_interactive(stdscr) -> None:
     search_mode = False
     search_query = ""
     search_matches: set[int] = set()
+    visual_lines: list[dict] = []
 
     while True:
         now = time.monotonic()
@@ -230,11 +255,13 @@ def run_interactive(stdscr) -> None:
                 user_scrolled = False
             if search_query:
                 search_matches = find_search_matches(rows, search_query)
+            visual_lines = build_visual_lines(rows, selected_pane_id, curses.COLS - 1)
             visible_lines = curses.LINES - (1 if search_mode or search_query else 0)
             if not user_scrolled:
                 selected_index = find_selected_row_index(rows, selected_pane_id)
-                scroll_offset = ensure_visible(selected_index, scroll_offset, visible_lines, scrolloff)
+                scroll_offset = ensure_visible_visual(visual_lines, selected_index, scroll_offset, visible_lines, scrolloff)
             max_offset = max(0, len(rows) - visible_lines)
+            max_offset = max(0, len(visual_lines) - visible_lines)
             scroll_offset = max(0, min(scroll_offset, max_offset))
             needs_render = True
 
@@ -242,7 +269,7 @@ def run_interactive(stdscr) -> None:
             render_screen(
                 stdscr,
                 rows,
-                selected_pane_id,
+                visual_lines,
                 scroll_offset,
                 search_query,
                 search_matches,
@@ -252,7 +279,9 @@ def run_interactive(stdscr) -> None:
                 window_attr,
                 pane_attr,
             )
-            _write_row_map(rows, scroll_offset)
+            for line in visual_lines:
+                line["row"] = rows[line["row_index"]]
+            _write_row_map(visual_lines, scroll_offset)
             needs_render = False
 
         key = stdscr.getch()
@@ -277,7 +306,7 @@ def run_interactive(stdscr) -> None:
                 needs_render = True
                 continue
             if bstate & MOUSE_SCROLL_DOWN:
-                max_offset = max(0, len(rows) - (curses.LINES - (1 if search_mode or search_query else 0)))
+                max_offset = max(0, len(visual_lines) - (curses.LINES - (1 if search_mode or search_query else 0)))
                 scroll_offset = min(max_offset, scroll_offset + MOUSE_SCROLL_LINES)
                 user_scrolled = True
                 needs_render = True
@@ -286,11 +315,12 @@ def run_interactive(stdscr) -> None:
                 _run_context_menu(my)
                 continue
             if bstate & (curses.BUTTON1_PRESSED | curses.BUTTON1_CLICKED):
-                row_idx = my + scroll_offset
-                if 0 <= row_idx < len(rows):
-                    clicked = rows[row_idx]
+                line_idx = my + scroll_offset
+                if 0 <= line_idx < len(visual_lines):
+                    clicked = rows[visual_lines[line_idx]["row_index"]]
                     if clicked["kind"] == "pane":
                         selected_pane_id = clicked["pane_id"]
+                        visual_lines = build_visual_lines(rows, selected_pane_id, curses.COLS - 1)
                         needs_render = True
                         subprocess.run(["tmux", "switch-client", "-t", clicked["session"]], check=False)
                         subprocess.run(["tmux", "select-window", "-t", clicked["window"]], check=False)
@@ -311,7 +341,7 @@ def run_interactive(stdscr) -> None:
                 search_query = ""
                 search_matches = set()
                 selected_index = find_selected_row_index(rows, selected_pane_id)
-                scroll_offset = ensure_visible(selected_index, scroll_offset, curses.LINES, scrolloff)
+                scroll_offset = ensure_visible_visual(visual_lines, selected_index, scroll_offset, curses.LINES, scrolloff)
             elif key in (10, 13):
                 search_mode = False
             elif key in (curses.KEY_BACKSPACE, 127, 8):
@@ -322,8 +352,9 @@ def run_interactive(stdscr) -> None:
                 if search_matches and (selected_index is None or selected_index not in search_matches):
                     selected_pane_id = next_search_match(rows, selected_pane_id, search_matches, 1)
                 user_scrolled = False
+                visual_lines = build_visual_lines(rows, selected_pane_id, curses.COLS - 1)
                 selected_index = find_selected_row_index(rows, selected_pane_id)
-                scroll_offset = ensure_visible(selected_index, scroll_offset, curses.LINES - 1, scrolloff)
+                scroll_offset = ensure_visible_visual(visual_lines, selected_index, scroll_offset, curses.LINES - 1, scrolloff)
             elif 32 <= key <= 126:
                 search_query += chr(key)
                 search_matches = find_search_matches(rows, search_query)
@@ -331,8 +362,9 @@ def run_interactive(stdscr) -> None:
                 if search_matches and (selected_index is None or selected_index not in search_matches):
                     selected_pane_id = next_search_match(rows, selected_pane_id, search_matches, 1)
                 user_scrolled = False
+                visual_lines = build_visual_lines(rows, selected_pane_id, curses.COLS - 1)
                 selected_index = find_selected_row_index(rows, selected_pane_id)
-                scroll_offset = ensure_visible(selected_index, scroll_offset, curses.LINES - 1, scrolloff)
+                scroll_offset = ensure_visible_visual(visual_lines, selected_index, scroll_offset, curses.LINES - 1, scrolloff)
             needs_render = True
             continue
 
@@ -353,22 +385,24 @@ def run_interactive(stdscr) -> None:
             if key == ord("n"):
                 selected_pane_id = next_search_match(rows, selected_pane_id, search_matches, 1)
                 user_scrolled = False
+                visual_lines = build_visual_lines(rows, selected_pane_id, curses.COLS - 1)
                 selected_index = find_selected_row_index(rows, selected_pane_id)
-                scroll_offset = ensure_visible(selected_index, scroll_offset, curses.LINES - 1, scrolloff)
+                scroll_offset = ensure_visible_visual(visual_lines, selected_index, scroll_offset, curses.LINES - 1, scrolloff)
                 needs_render = True
                 continue
             if key == ord("N"):
                 selected_pane_id = next_search_match(rows, selected_pane_id, search_matches, -1)
                 user_scrolled = False
+                visual_lines = build_visual_lines(rows, selected_pane_id, curses.COLS - 1)
                 selected_index = find_selected_row_index(rows, selected_pane_id)
-                scroll_offset = ensure_visible(selected_index, scroll_offset, curses.LINES - 1, scrolloff)
+                scroll_offset = ensure_visible_visual(visual_lines, selected_index, scroll_offset, curses.LINES - 1, scrolloff)
                 needs_render = True
                 continue
             if key == 27:
                 search_query = ""
                 search_matches = set()
                 selected_index = find_selected_row_index(rows, selected_pane_id)
-                scroll_offset = ensure_visible(selected_index, scroll_offset, curses.LINES, scrolloff)
+                scroll_offset = ensure_visible_visual(visual_lines, selected_index, scroll_offset, curses.LINES, scrolloff)
                 needs_render = True
                 continue
 
@@ -381,9 +415,10 @@ def run_interactive(stdscr) -> None:
         )
         if selection_changed:
             user_scrolled = False
+            visual_lines = build_visual_lines(rows, selected_pane_id, curses.COLS - 1)
             selected_index = find_selected_row_index(rows, selected_pane_id)
             visible_lines = curses.LINES - (1 if search_query else 0)
-            scroll_offset = ensure_visible(selected_index, scroll_offset, visible_lines, scrolloff)
+            scroll_offset = ensure_visible_visual(visual_lines, selected_index, scroll_offset, visible_lines, scrolloff)
             needs_render = True
             continue
 

@@ -26,37 +26,37 @@ EOF
 output="$(bash scripts/features/sidebar/render-sidebar.sh)"
 
 case "$output" in
-  *"├─ work"* ) ;;
+  *$'\n  work\n'* | '  work'* ) ;;
   * ) fail "expected session name in renderer output" ;;
 esac
 
 case "$output" in
-  *"│  └─ editor"* ) ;;
+  *$'\n  editor\n'* ) ;;
   * ) fail "expected window name in renderer output" ;;
 esac
 
 case "$output" in
-  *"│     └─ claude ❓"* ) ;;
+  *$'\n  claude ❓\n'* ) ;;
   * ) fail "expected needs-input badge in renderer output" ;;
 esac
 
 case "$output" in
-  *"│     └─ claude ❓"* ) ;;
+  *$'\n  claude ❓\n'* ) ;;
   * ) fail "expected active pane marker in renderer output" ;;
 esac
 
 case "$output" in
-  *"└─ ops"* ) ;;
+  *$'\n  ops\n'* ) ;;
   * ) fail "expected unicode pane branch continuation in renderer output" ;;
 esac
 
 case "$output" in
-  *"        ├─ codex ✅"* ) ;;
+  *$'\n  codex ✅\n'* ) ;;
   * ) fail "expected done badge in renderer output" ;;
 esac
 
 case "$output" in
-  *"        └─ codex ⏳"* ) ;;
+  *$'\n  codex ⏳'* ) ;;
   * ) fail "expected running badge in renderer output" ;;
 esac
 
@@ -67,6 +67,6 @@ EOF
 printf 'ops,work\n' > "$TEST_TMUX_DATA_DIR/option__tmux_sidebar_session_order.txt"
 
 output="$(bash scripts/features/sidebar/render-sidebar.sh)"
-first_session_line="$(printf '%s\n' "$output" | grep -E '^[[:space:]]*[├└]─ ' | head -n 1)"
+first_session_line="$(printf '%s\n' "$output" | grep -E '^  (ops|work)$' | head -n 1)"
 
-assert_eq "$first_session_line" '  ├─ ops'
+assert_eq "$first_session_line" '  ops'

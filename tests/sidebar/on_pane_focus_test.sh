@@ -14,7 +14,7 @@ printf '1\n' > "$TEST_TMUX_DATA_DIR/option__tmux_sidebar_enabled.txt"
 bash scripts/features/sidebar/on-pane-focus.sh "%1" "@1"
 
 assert_file_contains "$TEST_TMUX_DATA_DIR/commands.log" 'set-option -g @tmux_sidebar_main_pane %1'
-assert_file_contains "$TEST_TMUX_DATA_DIR/commands.log" 'split-window -t %1 -h -b -d -f -l 25'
+assert_file_contains "$TEST_TMUX_DATA_DIR/commands.log" 'split-window -t %1 -h -b -d -f -l 50'
 
 fake_tmux_no_sidebar
 fake_tmux_register_pane "%1" "work" "@1" "editor" "nvim"
@@ -58,7 +58,19 @@ EOF
 
 bash scripts/features/sidebar/on-pane-focus.sh "%6" "@1"
 
-assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%6.json" '"status":"idle"'
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%6.json" '"status":"done"'
+
+fake_tmux_no_sidebar
+fake_tmux_register_pane "%16" "work" "@1" "editor" "codex --full-auto" "codex-aarch64-apple-darwin"
+printf '1\n' > "$TEST_TMUX_DATA_DIR/option__tmux_sidebar_enabled.txt"
+
+cat > "$TMUX_SIDEBAR_STATE_DIR/pane-%16.json" <<'EOF'
+{"pane_id":"%16","app":"codex","status":"done-unread","updated_at":100}
+EOF
+
+bash scripts/features/sidebar/on-pane-focus.sh "%16" "@1"
+
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%16.json" '"status":"done"'
 
 fake_tmux_no_sidebar
 fake_tmux_register_pane "%90" "work" "@1" "editor" "Sidebar" "python3"

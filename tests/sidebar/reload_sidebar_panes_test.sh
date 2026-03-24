@@ -13,7 +13,7 @@ bash scripts/features/sidebar/reload-sidebar-panes.sh
 assert_file_contains "$TEST_TMUX_DATA_DIR/commands.log" 'respawn-pane -k -t %90 python3'
 assert_file_contains "$TEST_TMUX_DATA_DIR/commands.log" 'sidebar-ui.py'
 assert_file_contains "$TEST_TMUX_DATA_DIR/commands.log" 'set-option -p -t %90 allow-set-title off'
-assert_file_not_contains "$TEST_TMUX_DATA_DIR/commands.log" 'split-window -h -b -d -f -l 25'
+assert_file_not_contains "$TEST_TMUX_DATA_DIR/commands.log" 'split-window -h -b -d -f -l 50'
 
 fake_tmux_no_sidebar
 fake_tmux_register_pane "%1" "work" "@1" "editor" "nvim"

@@ -59,21 +59,29 @@ clear_terminal_pane_state() {
   local state_file="$1"
   [ -f "$state_file" ] || return 1
 
-  local status state_dir tmp_file
+  local status state_dir tmp_file replacement_status
   status="$(json_get_string "$state_file" "status")"
   case "$status" in
-    needs-input|done)
-      state_dir="$(dirname "$state_file")"
-      tmp_file="$(mktemp "$state_dir/.pane-state.XXXXXX")"
-      sed 's/"status":"[^"]*"/"status":"idle"/' "$state_file" > "$tmp_file"
-      mv "$tmp_file" "$state_file"
-      signal_sidebar_refresh
-      return 0
+    needs-input)
+      replacement_status="idle"
+      ;;
+    done-unread)
+      replacement_status="done"
+      ;;
+    done)
+      return 1
       ;;
     *)
       return 1
       ;;
   esac
+
+  state_dir="$(dirname "$state_file")"
+  tmp_file="$(mktemp "$state_dir/.pane-state.XXXXXX")"
+  sed "s/\"status\":\"[^\"]*\"/\"status\":\"$replacement_status\"/" "$state_file" > "$tmp_file"
+  mv "$tmp_file" "$state_file"
+  signal_sidebar_refresh
+  return 0
 }
 
 window_key_for_id() {

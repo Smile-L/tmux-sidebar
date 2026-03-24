@@ -9,4 +9,4 @@ fake_tmux_register_pane "%1" "work" "@1" "editor" "nvim"
 bash scripts/features/sidebar/close-sidebar.sh
 
 assert_file_not_contains "$TEST_TMUX_DATA_DIR/commands.log" 'set-option -g @tmux_sidebar_enabled 1'
-assert_file_not_contains "$TEST_TMUX_DATA_DIR/commands.log" 'split-window -h -b -d -f -l 25'
+assert_file_not_contains "$TEST_TMUX_DATA_DIR/commands.log" 'split-window -h -b -d -f -l 50'
