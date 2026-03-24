@@ -75,6 +75,27 @@ source-file ~/.tmux/plugins/tmux-sidebar/sidebar.tmux
 
 Then `tmux source-file ~/.tmux.conf`.
 
+### Install your own customized branch
+
+If you want to install this exact customized sidebar build on another machine,
+publish your branch to your own fork or create a `git bundle`, then clone that
+branch into the standard tmux plugin path:
+
+```bash
+git clone --branch codex/sidebar-width-separators --single-branch \
+  <your-fork-or-bundle> \
+  ~/.tmux/plugins/tmux-sidebar
+```
+
+Use the same tmux config snippet as the manual install:
+
+```tmux
+source-file ~/.tmux/plugins/tmux-sidebar/sidebar.tmux
+```
+
+For a full publish-and-install walkthrough, see
+[`docs/install-custom-branch.md`](docs/install-custom-branch.md).
+
 ## Usage
 
 ### Toggle
