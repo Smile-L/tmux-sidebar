@@ -217,6 +217,26 @@ assert_contains "$output" 'codex'
 assert_not_contains "$output" '⏳'
 
 fake_tmux_set_tree <<'EOF'
+test|@1|python3.12|%30|python3.12|python3.12|1
+EOF
+rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
+
+output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
+
+python_count="$(printf '%s\n' "$output" | grep -c '^  python3\.12$' || true)"
+assert_eq "$python_count" "1"
+
+fake_tmux_set_tree <<'EOF'
+test|@1|POLY|%31|zsh|zsh|1
+EOF
+rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
+
+output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
+
+assert_contains "$output" 'POLY'
+assert_contains "$output" 'zsh'
+
+fake_tmux_set_tree <<'EOF'
 work|@1|editor|%2|superlongpanecommand|superlongpanecommand|1
 EOF
 printf '14\n' > "$TEST_TMUX_DATA_DIR/option__tmux_sidebar_width.txt"

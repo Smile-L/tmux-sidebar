@@ -29,6 +29,21 @@ def ordered_sessions(sessions: OrderedDict[str, dict]) -> list[dict]:
     return ordered
 
 
+def _normalized_label(text: str) -> str:
+    return " ".join(str(text).strip().lower().split())
+
+
+def _should_show_window_row(display_name: str, visible_panes: list[dict], pane_states: dict[str, dict]) -> bool:
+    if not visible_panes:
+        return True
+    if len(visible_panes) != 1:
+        return True
+    pane = visible_panes[0]
+    pane_state = pane_states.get(pane["id"], {})
+    pane_label = pane_display_label(pane["label"], pane["title"], pane_state)
+    return _normalized_label(display_name) != _normalized_label(pane_label)
+
+
 def load_tree() -> list[dict]:
     raw = run_tmux(
         "list-panes",
@@ -132,7 +147,8 @@ def load_tree() -> list[dict]:
             }
             if hide_panes and not visible_panes:
                 window_row["pane_id"] = window["id"]
-            rows.append(window_row)
+            if _should_show_window_row(display_name, visible_panes, pane_states) or ("pane_id" in window_row):
+                rows.append(window_row)
             for pane in visible_panes:
                 pane_state = pane_states.get(pane["id"], {})
                 status = effective_pane_status(pane["id"], pane["label"], pane["title"], pane_state)
