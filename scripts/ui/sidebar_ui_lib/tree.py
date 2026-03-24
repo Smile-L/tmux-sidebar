@@ -5,7 +5,7 @@ import subprocess
 from collections import OrderedDict
 
 from .core import STATE_DIR, SIDEBAR_TITLES, configured_sidebar_width, run_tmux, tmux_option
-from .status import badge_for_status, effective_pane_status, pane_display_label, titlecase_agent_name, window_display_name
+from .status import badge_for_status, effective_pane_status, pane_display_label, sync_inferred_script_states, titlecase_agent_name, window_display_name
 
 
 def ordered_sessions(sessions: OrderedDict[str, dict]) -> list[dict]:
@@ -112,6 +112,8 @@ def load_tree() -> list[dict]:
             pane_states[pane_id] = json.loads(state_file.read_text())
         except Exception:
             continue
+
+    pane_states = sync_inferred_script_states(sessions, pane_states)
 
     hide_panes = tmux_option("@tmux_sidebar_hide_panes").lower() in ("on", "1", "true", "yes")
 

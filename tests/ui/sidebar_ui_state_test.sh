@@ -217,13 +217,55 @@ assert_contains "$output" 'codex'
 assert_not_contains "$output" '⏳'
 
 fake_tmux_set_tree <<'EOF'
+test|@1|python-task|%16|python3.12|python3.12|1
+EOF
+rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
+fake_tmux_set_capture "%16" <<'EOF'
+Processing rows...
+Still running...
+EOF
+
+output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
+
+assert_contains "$output" '⏳'
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%16.json" '"app":"script"'
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%16.json" '"status":"running"'
+
+fake_tmux_set_tree <<'EOF'
+test|@1|python-task|%16|zsh|zsh|0
+EOF
+fake_tmux_set_capture "%16" <<'EOF'
+(base) lisimin@localhost project % 
+EOF
+
+output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
+
+assert_contains "$output" '✓'
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%16.json" '"status":"done-unread"'
+
+cat > "$TMUX_SIDEBAR_STATE_DIR/pane-%17.json" <<'EOF'
+{"pane_id":"%17","app":"script","status":"running","message":"python3.12","updated_at":100}
+EOF
+fake_tmux_set_tree <<'EOF'
+test|@1|python-task|%17|zsh|zsh|1
+EOF
+fake_tmux_set_capture "%17" <<'EOF'
+(base) lisimin@localhost project % 
+EOF
+
+output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
+
+assert_contains "$output" '✅'
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%17.json" '"status":"done"'
+
+fake_tmux_set_tree <<'EOF'
 test|@1|python3.12|%30|python3.12|python3.12|1
 EOF
 rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
 
 output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 
-python_count="$(printf '%s\n' "$output" | grep -c '^  python3\.12$' || true)"
+python_count="$(printf '%s\n' "$output" | grep -c '^  python3\.12' || true)"
 assert_eq "$python_count" "1"
 
 fake_tmux_set_tree <<'EOF'
@@ -234,7 +276,7 @@ rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
 
 output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 
-python_count="$(printf '%s\n' "$output" | grep -c '^  python3\.12$' || true)"
+python_count="$(printf '%s\n' "$output" | grep -c '^  python3\.12' || true)"
 assert_eq "$python_count" "2"
 
 fake_tmux_set_tree <<'EOF'

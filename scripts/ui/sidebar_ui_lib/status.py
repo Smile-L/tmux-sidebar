@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
+import time
 
-from .core import run_tmux, tmux_option
+from .core import STATE_DIR, run_tmux, tmux_option
 
 
 SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
@@ -26,6 +28,34 @@ NON_AGENT_COMMANDS = {
     "yazi",
     "zsh",
 }
+SHELL_COMMANDS = {
+    "ash",
+    "bash",
+    "fish",
+    "ksh",
+    "sh",
+    "zsh",
+}
+SCRIPT_RUNNER_COMMANDS = {
+    "bun",
+    "cargo",
+    "deno",
+    "go",
+    "just",
+    "lua",
+    "make",
+    "node",
+    "npm",
+    "perl",
+    "php",
+    "pnpm",
+    "pytest",
+    "python",
+    "ruby",
+    "uv",
+    "yarn",
+}
+SCRIPT_STATE_APP = "script"
 DEFAULT_BADGES: dict[str, str] = {
     "running": "⏳",
     "needs-input": "❓",
@@ -42,6 +72,12 @@ BADGE_OPTIONS: dict[str, str] = {
 }
 
 _badge_cache: dict[str, str] | None = None
+_SHELL_PROMPT_RE = re.compile(
+    r"^(?:\([^)]*\)\s*)?(?:(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9._~/-]+\s+)?[%#$]\s*$"
+)
+_PYTHON_REPL_PROMPT_RE = re.compile(r"^(>>>|\.\.\.)\s*$")
+_IPYTHON_REPL_PROMPT_RE = re.compile(r"^In \[\d+\]:\s*$")
+_NODE_REPL_PROMPT_RE = re.compile(r"^>\s*$")
 
 
 def configured_badges() -> dict[str, str]:
@@ -75,6 +111,114 @@ def normalize_token(value: str) -> str:
     if "/" in token:
         token = token.rsplit("/", 1)[-1]
     return token
+
+
+def _capture_tail_lines(pane_id: str, limit: int = 4) -> list[str]:
+    if not pane_id:
+        return []
+    try:
+        capture = run_tmux("capture-pane", "-pt", pane_id)
+    except Exception:
+        return []
+    return [line.rstrip() for line in capture.splitlines() if line.strip()][-limit:]
+
+
+def _looks_like_shell_prompt(line: str) -> bool:
+    stripped = line.strip()
+    if stripped in {"$", "%", "#"}:
+        return True
+    return bool(_SHELL_PROMPT_RE.match(stripped))
+
+
+def _looks_like_repl_prompt(command: str, line: str) -> bool:
+    token = normalize_token(command)
+    stripped = line.strip()
+    if token.startswith("python") and (_PYTHON_REPL_PROMPT_RE.match(stripped) or _IPYTHON_REPL_PROMPT_RE.match(stripped)):
+        return True
+    if token == "node" and _NODE_REPL_PROMPT_RE.match(stripped):
+        return True
+    return False
+
+
+def looks_like_script_runner(command: str) -> bool:
+    token = normalize_token(command)
+    if token in SCRIPT_RUNNER_COMMANDS:
+        return True
+    if token.startswith("python") and re.match(r"^python\d+(?:\.\d+)*$", token):
+        return True
+    return False
+
+
+def infer_script_runtime_status(pane_id: str, command: str, active: bool, state: dict | None) -> str:
+    token = normalize_token(command)
+    existing_app = str((state or {}).get("app", "")).strip().lower()
+    existing_status = str((state or {}).get("status", "")).strip().lower()
+    existing_script_state = existing_app == SCRIPT_STATE_APP and existing_status in ("running", "done", "done-unread")
+
+    if existing_app in ("claude", "codex") or looks_like_codex(command) or looks_like_claude(command):
+        return ""
+
+    if looks_like_script_runner(command):
+        if token in SHELL_COMMANDS:
+            tail_lines = _capture_tail_lines(pane_id)
+            if tail_lines and any(_looks_like_shell_prompt(line) for line in tail_lines[-2:]):
+                if existing_status == "running":
+                    return "done" if active else "done-unread"
+                return existing_status if existing_script_state else ""
+            return "running"
+        tail_lines = _capture_tail_lines(pane_id)
+        if tail_lines and any(_looks_like_repl_prompt(command, line) for line in tail_lines[-2:]):
+            if existing_status == "running":
+                return "done" if active else "done-unread"
+            return existing_status if existing_script_state else ""
+        return "running"
+
+    if existing_status == "running":
+        return "done" if active else "done-unread"
+    if existing_script_state:
+        return existing_status
+    return ""
+
+
+def sync_inferred_script_states(sessions: dict, pane_states: dict[str, dict]) -> dict[str, dict]:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    updated_states = dict(pane_states)
+    for session in sessions.values():
+        for window in session["windows"].values():
+            for pane in window["panes"]:
+                pane_state = updated_states.get(pane["id"], {})
+                inferred_status = infer_script_runtime_status(pane["id"], pane["label"], pane["active"], pane_state)
+                if not inferred_status:
+                    continue
+                message = str(pane_state.get("message", "")).strip() or pane["label"]
+                if (
+                    str(pane_state.get("app", "")).strip().lower() == SCRIPT_STATE_APP
+                    and str(pane_state.get("status", "")).strip().lower() == inferred_status
+                    and str(pane_state.get("pane_current_command", "")).strip() == pane["label"]
+                    and str(pane_state.get("pane_title", "")).strip() == pane["title"]
+                ):
+                    continue
+                next_state = {
+                    "pane_id": pane["id"],
+                    "session_name": pane["session"],
+                    "window_id": pane["window"],
+                    "window_name": window["name"],
+                    "pane_title": pane["title"],
+                    "pane_current_command": pane["label"],
+                    "app": SCRIPT_STATE_APP,
+                    "status": inferred_status,
+                    "message": message,
+                    "updated_at": int(time.time()),
+                }
+                state_path = STATE_DIR / f"pane-{pane['id']}.json"
+                tmp_path = state_path.with_suffix(".tmp")
+                try:
+                    tmp_path.write_text(json.dumps(next_state, separators=(",", ":")) + "\n")
+                    tmp_path.rename(state_path)
+                except OSError:
+                    continue
+                updated_states[pane["id"]] = next_state
+    return updated_states
 
 
 def looks_like_codex(value: str) -> bool:
@@ -152,6 +296,10 @@ def codex_terminal_status(pane_id: str) -> str:
 def effective_pane_status(pane_id: str, command: str, title: str, state: dict | None) -> str:
     live_app = live_agent_app(command, title, state)
     if not live_app:
+        script_app = str((state or {}).get("app", "")).strip().lower()
+        script_status = str((state or {}).get("status", "")).strip().lower()
+        if script_app == SCRIPT_STATE_APP and script_status in ("running", "done", "done-unread"):
+            return script_status
         return ""
 
     status = str((state or {}).get("status", "")).strip().lower()
