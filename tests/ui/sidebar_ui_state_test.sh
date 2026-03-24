@@ -227,6 +227,17 @@ python_count="$(printf '%s\n' "$output" | grep -c '^  python3\.12$' || true)"
 assert_eq "$python_count" "1"
 
 fake_tmux_set_tree <<'EOF'
+test|@1|python3.12|%30|python3.12|python3.12|1
+test|@1|python3.12|%31|python3.12|python3.12|0
+EOF
+rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json
+
+output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
+
+python_count="$(printf '%s\n' "$output" | grep -c '^  python3\.12$' || true)"
+assert_eq "$python_count" "2"
+
+fake_tmux_set_tree <<'EOF'
 test|@1|POLY|%31|zsh|zsh|1
 EOF
 rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json

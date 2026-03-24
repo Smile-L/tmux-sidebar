@@ -302,7 +302,7 @@ def build_visual_lines(rows: list[dict], selected_pane_id: str, max_width: int |
             base_segments = [(prefix, "base")]
             if row.get("agent_name"):
                 base_segments.append((f"[{row['agent_name']}] ", "pill"))
-            title_label = row.get("window_name") or row.get("label") or row.get("pane_command") or row.get("text") or ""
+            title_label = row.get("label") or row.get("window_name") or row.get("pane_command") or row.get("text") or ""
             base_segments.append((title_label, "title"))
             if badge:
                 base_segments.append((f" [{badge}]", f"badge:{row.get('status', '')}"))

@@ -36,12 +36,13 @@ def _normalized_label(text: str) -> str:
 def _should_show_window_row(display_name: str, visible_panes: list[dict], pane_states: dict[str, dict]) -> bool:
     if not visible_panes:
         return True
-    if len(visible_panes) != 1:
-        return True
-    pane = visible_panes[0]
-    pane_state = pane_states.get(pane["id"], {})
-    pane_label = pane_display_label(pane["label"], pane["title"], pane_state)
-    return _normalized_label(display_name) != _normalized_label(pane_label)
+    normalized_display_name = _normalized_label(display_name)
+    normalized_pane_labels = []
+    for pane in visible_panes:
+        pane_state = pane_states.get(pane["id"], {})
+        pane_label = pane_display_label(pane["label"], pane["title"], pane_state)
+        normalized_pane_labels.append(_normalized_label(pane_label))
+    return any(label != normalized_display_name for label in normalized_pane_labels)
 
 
 def load_tree() -> list[dict]:
