@@ -7,6 +7,7 @@ bind-key t run-shell -b "#{@tmux_sidebar_dir}/scripts/features/sidebar/focus-sid
 if-shell -F '#{>=:#{version},3.3}' 'set-hook -g "client-active[198]" "run-shell -b \"#{@tmux_sidebar_dir}/scripts/features/sidebar/ensure-sidebar-pane.sh\""'
 set-hook -g "client-attached[199]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/ensure-sidebar-pane.sh'"
 set-hook -g "client-session-changed[200]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/on-pane-focus.sh #{pane_id} #{window_id}'"
+set-hook -g "window-pane-changed[201]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/on-pane-focus.sh #{pane_id} #{window_id}'"
 if-shell -F '#{>=:#{version},3.3}' 'set-hook -g "client-focus-in[202]" "run-shell -b \"#{@tmux_sidebar_dir}/scripts/features/sidebar/on-pane-focus.sh #{pane_id} #{window_id}\""'
 set-hook -g "after-select-window[203]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/on-pane-focus.sh #{pane_id} #{window_id}'"
 set-hook -g "after-select-pane[204]" "run-shell -b '#{@tmux_sidebar_dir}/scripts/features/sidebar/on-pane-focus.sh #{pane_id} #{window_id}'"

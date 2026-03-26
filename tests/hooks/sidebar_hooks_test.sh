@@ -6,6 +6,7 @@ set -euo pipefail
 assert_file_contains "sidebar.tmux" 'client-active[198]'
 assert_file_contains "sidebar.tmux" 'client-attached[199]'
 assert_file_contains "sidebar.tmux" 'client-session-changed[200]'
+assert_file_contains "sidebar.tmux" 'window-pane-changed[201]'
 assert_file_contains "sidebar.tmux" 'client-focus-in[202]'
 assert_file_contains "sidebar.tmux" 'after-select-window[203]'
 assert_file_contains "sidebar.tmux" 'after-select-pane[204]'

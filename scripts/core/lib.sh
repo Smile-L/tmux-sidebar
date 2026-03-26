@@ -1,8 +1,51 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+tmux_sidebar_state_dir_option() {
+  printf '%s\n' '@tmux_sidebar_state_dir'
+}
+
+_state_dir_is_writable() {
+  local candidate="${1:-}" probe
+  [ -n "$candidate" ] || return 1
+  mkdir -p "$candidate" 2>/dev/null || true
+  probe="$candidate/.write-test.$$"
+  if { : > "$probe"; } 2>/dev/null; then
+    rm -f "$probe"
+    return 0
+  fi
+  return 1
+}
+
+persist_tmux_sidebar_state_dir() {
+  local candidate="${1:-}"
+  [ -n "$candidate" ] || return 0
+  tmux set-option -g "$(tmux_sidebar_state_dir_option)" "$candidate" 2>/dev/null || true
+}
+
 print_state_dir() {
-  printf '%s\n' "${TMUX_SIDEBAR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/tmux-sidebar}"
+  local preferred fallback candidate stored_option
+  stored_option="$(tmux show-options -gv "$(tmux_sidebar_state_dir_option)" 2>/dev/null || true)"
+  if _state_dir_is_writable "$stored_option"; then
+    printf '%s\n' "$stored_option"
+    return 0
+  fi
+  fallback="/tmp/tmux-sidebar-$(id -u)"
+  if [ -n "${TMUX_SIDEBAR_STATE_DIR:-}" ]; then
+    preferred="$TMUX_SIDEBAR_STATE_DIR"
+  elif [ -n "${XDG_STATE_HOME:-}" ]; then
+    preferred="$XDG_STATE_HOME/tmux-sidebar"
+  else
+    preferred="$fallback"
+  fi
+  for candidate in "$preferred" "$fallback"; do
+    if _state_dir_is_writable "$candidate"; then
+      persist_tmux_sidebar_state_dir "$candidate"
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  printf '%s\n' "$preferred"
 }
 
 sidebar_pane_title() {
@@ -55,21 +98,65 @@ json_get_number() {
   sed -n "s/.*\"$key\":\\([0-9][0-9]*\\).*/\\1/p" "$path"
 }
 
-clear_terminal_pane_state() {
+pane_event_log_dir() {
+  printf '%s/events\n' "$(print_state_dir)"
+}
+
+pane_event_log_path() {
+  local pane_id="${1:-}"
+  printf '%s/pane-%s.ndjson\n' "$(pane_event_log_dir)" "${pane_id//%/}"
+}
+
+_rotate_event_log_if_needed() {
+  local path="$1"
+  [ -f "$path" ] || return 0
+  local size
+  size="$(wc -c < "$path" 2>/dev/null || printf '0')"
+  [ "$size" -lt 262144 ] || {
+    mv "$path" "$path.1" 2>/dev/null || true
+    : > "$path"
+  }
+}
+
+append_pane_event_log() {
+  local pane_id="${1:-}"
+  local payload="${2:-}"
+  [ -n "$pane_id" ] || return 0
+  [ -n "$payload" ] || return 0
+
+  local dir path
+  dir="$(pane_event_log_dir)"
+  mkdir -p "$dir" 2>/dev/null || return 0
+  path="$(pane_event_log_path "$pane_id")"
+  _rotate_event_log_if_needed "$path" || true
+
+  printf '%s\n' "$payload" >> "$path" 2>/dev/null || true
+}
+
+mark_terminal_pane_state_read_on_focus() {
   local state_file="$1"
   [ -f "$state_file" ] || return 1
 
-  local status state_dir tmp_file replacement_status
+  local status app state_dir tmp_file replacement_status
   status="$(json_get_string "$state_file" "status")"
+  app="$(json_get_string "$state_file" "app")"
   case "$status" in
     needs-input)
+      if [ "$app" = "codex" ]; then
+        return 1
+      fi
       replacement_status="idle"
       ;;
     done-unread)
+      if [ "$app" = "codex" ]; then
+        return 1
+      fi
       replacement_status="done"
       ;;
     done)
-      return 1
+      if [ "$app" = "codex" ]; then
+        return 1
+      fi
       ;;
     *)
       return 1
@@ -80,6 +167,36 @@ clear_terminal_pane_state() {
   tmp_file="$(mktemp "$state_dir/.pane-state.XXXXXX")"
   sed "s/\"status\":\"[^\"]*\"/\"status\":\"$replacement_status\"/" "$state_file" > "$tmp_file"
   mv "$tmp_file" "$state_file"
+
+  pane_id="$(json_get_string "$state_file" "pane_id")"
+  if [ -n "$pane_id" ]; then
+    append_pane_event_log "$pane_id" "$(printf '{\"ts\":%d,\"pane_id\":\"%s\",\"app\":\"%s\",\"component\":\"lib\",\"event\":\"进入pane清已读/输入\",\"window_id\":\"\",\"previous_status\":\"%s\",\"requested_status\":\"focus\",\"next_status\":\"%s\"}' "$(date +%s)" "$(json_escape "$pane_id")" "$(json_escape "$app")" "$(json_escape "$status")" "$(json_escape "$replacement_status")")"
+  fi
+
+  signal_sidebar_refresh
+  return 0
+}
+
+mark_terminal_pane_state_unread_on_blur() {
+  local state_file="$1"
+  [ -f "$state_file" ] || return 1
+
+  local status app state_dir tmp_file
+  status="$(json_get_string "$state_file" "status")"
+  app="$(json_get_string "$state_file" "app")"
+  [ "$app" = "codex" ] || return 1
+  [ "$status" = "done" ] || return 1
+
+  state_dir="$(dirname "$state_file")"
+  tmp_file="$(mktemp "$state_dir/.pane-state.XXXXXX")"
+  sed 's/"status":"done"/"status":"done-unread"/' "$state_file" > "$tmp_file"
+  mv "$tmp_file" "$state_file"
+
+  pane_id="$(json_get_string "$state_file" "pane_id")"
+  if [ -n "$pane_id" ]; then
+    append_pane_event_log "$pane_id" "$(printf '{\"ts\":%d,\"pane_id\":\"%s\",\"app\":\"%s\",\"component\":\"lib\",\"event\":\"离开pane标未读\",\"window_id\":\"\",\"previous_status\":\"done\",\"requested_status\":\"blur\",\"next_status\":\"done-unread\"}' "$(date +%s)" "$(json_escape "$pane_id")" "$(json_escape "$app")")"
+  fi
+
   signal_sidebar_refresh
   return 0
 }

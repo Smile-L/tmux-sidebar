@@ -21,7 +21,7 @@ if [ -n "$legacy_event$legacy_status$legacy_message" ]; then
   hook_status=""
   case "$legacy_event" in
     agent-turn-complete|complete|completed|done|finish|finished|stop|stopped|task-complete|turn-complete|session-end)
-      hook_status="done"
+      hook_status="done-unread"
       ;;
     error|fail|failure)
       hook_status="error"
@@ -43,7 +43,7 @@ if [ -n "$legacy_event$legacy_status$legacy_message" ]; then
         hook_status="error"
         ;;
       done|completed|finished|stopped)
-        hook_status="done"
+        hook_status="done-unread"
         ;;
       needs-input)
         hook_status="needs-input"
@@ -60,6 +60,7 @@ if [ -n "$legacy_event$legacy_status$legacy_message" ]; then
     --pane "${TMUX_PANE:-}" \
     --app codex \
     --status "$hook_status" \
+    --source notify \
     --message "$legacy_message"
 fi
 
@@ -70,4 +71,5 @@ exec "$update_helper" \
   --pane "${TMUX_PANE:-}" \
   --app codex \
   --status "$hook_status" \
+  --source notify \
   --message "$hook_message"

@@ -85,7 +85,14 @@ _CODEX_APPROVAL_RE = re.compile(
     r"Would you like to run the following command\?|Press enter to confirm or esc to cancel",
     re.IGNORECASE,
 )
+_CODEX_APPROVAL_MENU_RE = re.compile(r"^\s*[❯>]?\s*[0-9]+\.\s+", re.MULTILINE)
 _CODEX_PROMPT_RE = re.compile(r"^\s*›\s+.+$")
+_CODEX_STATUS_LINE_RE = re.compile(r"gpt-[^·]+·")
+_CLAUDE_APPROVAL_RE = re.compile(
+    r"This command requires approval|Do you want to proceed\?",
+    re.IGNORECASE,
+)
+_CLAUDE_APPROVAL_MENU_RE = re.compile(r"^\s*[❯>]?\s*[0-9]+\.\s+", re.MULTILINE)
 INFERRED_CODEX_RUNNING_HOLD_SECONDS = 5
 INFERRED_CODEX_NEEDS_INPUT_HOLD_SECONDS = 10
 
@@ -294,6 +301,7 @@ def sync_inferred_script_states(sessions: dict, pane_states: dict[str, dict]) ->
                 existing_status = str((pane_state or {}).get("status", "")).strip().lower()
                 inferred = bool((pane_state or {}).get("inferred"))
                 state_path = STATE_DIR / f"pane-{pane['id']}.json"
+                authoritative_codex_state = existing_app == "codex" and existing_status and not inferred
 
                 if live_app != "codex":
                     if inferred and existing_app == "codex":
@@ -304,6 +312,12 @@ def sync_inferred_script_states(sessions: dict, pane_states: dict[str, dict]) ->
                         except OSError:
                             pass
                         updated_states.pop(pane["id"], None)
+                    continue
+
+                # App-server and notify writers both emit concrete Codex state files.
+                # Once one exists, only fall back to terminal inference for panes with
+                # no authoritative external state.
+                if authoritative_codex_state:
                     continue
 
                 terminal_status = codex_terminal_status(pane["id"])
@@ -330,15 +344,55 @@ def sync_inferred_script_states(sessions: dict, pane_states: dict[str, dict]) ->
                     updated_states[pane["id"]] = next_state
                     continue
 
+                if codex_terminal_completed_recently(pane["id"]):
+                    completed_status = "done-unread"
+                    next_state = {
+                        "pane_id": pane["id"],
+                        "session_name": pane["session"],
+                        "window_id": pane["window"],
+                        "window_name": window["name"],
+                        "pane_title": pane["title"],
+                        "pane_current_command": pane["label"],
+                        "app": "codex",
+                        "status": completed_status,
+                        "message": str(pane_state.get("message", "")).strip(),
+                        "updated_at": now,
+                        "inferred": True,
+                    }
+                    tmp_path = state_path.with_suffix(".tmp")
+                    try:
+                        tmp_path.write_text(json.dumps(next_state, separators=(",", ":")) + "\n")
+                        tmp_path.rename(state_path)
+                    except OSError:
+                        continue
+                    updated_states[pane["id"]] = next_state
+                    continue
+
                 if inferred and existing_app == "codex":
                     if codex_terminal_idle(pane["id"]):
-                        try:
-                            state_path.unlink()
-                        except FileNotFoundError:
-                            pass
-                        except OSError:
-                            pass
-                        updated_states.pop(pane["id"], None)
+                        if existing_status in ("running", "needs-input"):
+                            completed_status = "done-unread"
+                            next_state = {
+                                "pane_id": pane["id"],
+                                "session_name": pane["session"],
+                                "window_id": pane["window"],
+                                "window_name": window["name"],
+                                "pane_title": pane["title"],
+                                "pane_current_command": pane["label"],
+                                "app": "codex",
+                                "status": completed_status,
+                                "message": str(pane_state.get("message", "")).strip(),
+                                "updated_at": now,
+                                "inferred": True,
+                            }
+                            tmp_path = state_path.with_suffix(".tmp")
+                            try:
+                                tmp_path.write_text(json.dumps(next_state, separators=(",", ":")) + "\n")
+                                tmp_path.rename(state_path)
+                            except OSError:
+                                continue
+                            updated_states[pane["id"]] = next_state
+                            continue
                         continue
                     updated_at = int((pane_state or {}).get("updated_at", 0) or 0)
                     hold_seconds = 0
@@ -470,12 +524,26 @@ def codex_terminal_status(pane_id: str) -> str:
     if not recent_lines:
         return ""
     recent = "\n".join(recent_lines)
+    if _CODEX_APPROVAL_MENU_RE.search(recent):
+        return "needs-input"
     if _CODEX_APPROVAL_RE.search(recent):
         return "needs-input"
     if _CODEX_WORKING_RE.search(recent):
         return "running"
     if any(_CODEX_PROMPT_RE.match(line.strip()) for line in recent_lines[-3:]):
         return ""
+    return ""
+
+
+def claude_terminal_status(pane_id: str) -> str:
+    recent_lines = _capture_recent_lines(pane_id, limit=20)
+    if not recent_lines:
+        return ""
+    recent = "\n".join(recent_lines)
+    if _CLAUDE_APPROVAL_MENU_RE.search(recent):
+        return "needs-input"
+    if _CLAUDE_APPROVAL_RE.search(recent):
+        return "needs-input"
     return ""
 
 
@@ -489,6 +557,43 @@ def codex_terminal_idle(pane_id: str) -> bool:
     has_prompt = any(_CODEX_PROMPT_RE.match(line) for line in tail)
     has_status_line = any("gpt-" in line and "·" in line for line in recent_lines[-8:])
     return has_prompt and has_status_line
+
+
+def codex_terminal_completed_recently(pane_id: str) -> bool:
+    recent_lines = [line.strip() for line in _capture_recent_lines(pane_id, limit=40)]
+    if not recent_lines or not codex_terminal_idle(pane_id):
+        return False
+    prompt_indices = [index for index, line in enumerate(recent_lines) if _CODEX_PROMPT_RE.match(line)]
+    if not prompt_indices:
+        return False
+    last_prompt_index = prompt_indices[-1]
+    window = recent_lines[max(0, last_prompt_index - 28):last_prompt_index]
+    if not window:
+        return False
+    for line in reversed(window):
+        if not line:
+            continue
+        if _CODEX_WORKING_RE.match(line):
+            return False
+        if _CODEX_APPROVAL_RE.search(line):
+            return False
+        if _CODEX_BANNER_RE.search(line):
+            continue
+        if _CODEX_STATUS_LINE_RE.search(line):
+            continue
+        if line == "/status":
+            continue
+        if line.startswith(("│", "╭", "╰", "─")):
+            continue
+        if re.match(r"^(Model|Directory|Permissions|Agents\.md|Account|Collaboration mode|Session|Context window|5h limit|Weekly limit|Visit https?://)", line):
+            continue
+        if _CODEX_PROMPT_RE.match(line):
+            continue
+        if line.startswith(("• ", "- ", "■ ", "⚠ ")):
+            return True
+        if re.search(r"[\u4e00-\u9fffA-Za-z]", line):
+            return True
+    return False
 
 
 def effective_pane_status(pane_id: str, command: str, title: str, state: dict | None) -> str:
@@ -506,9 +611,11 @@ def effective_pane_status(pane_id: str, command: str, title: str, state: dict | 
 
     status = str((state or {}).get("status", "")).strip().lower()
     if live_app == "codex":
-        if bool((state or {}).get("inferred")) and codex_terminal_idle(pane_id):
-            return ""
+        if bool((state or {}).get("inferred")) and codex_terminal_idle(pane_id) and status in ("running", "needs-input"):
+            return "done-unread"
         if status in ("running", "needs-input", "error", "done", "done-unread"):
+            if status == "done":
+                return "done-unread"
             return status
         terminal_status = codex_terminal_status(pane_id)
         if terminal_status:
@@ -516,10 +623,13 @@ def effective_pane_status(pane_id: str, command: str, title: str, state: dict | 
         return ""
 
     if status == "idle":
-        return ""
+        status = ""
     title_status = claude_title_status(title)
     if title_status:
         return title_status
+    terminal_status = claude_terminal_status(pane_id)
+    if terminal_status:
+        return terminal_status
     if status in ("running", "needs-input", "error", "done", "done-unread"):
         return status
     return ""

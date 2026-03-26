@@ -16,6 +16,9 @@ bash scripts/features/state/update-pane-state.sh \
 assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%7.json" '"status":"needs-input"'
 assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%7.json" '"app":"claude"'
 assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%7.json" '"session_name":"work"'
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/events/pane-7.ndjson" '"event":"写入状态"'
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/events/pane-7.ndjson" '"requested_status":"needs-input"'
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/events/pane-7.ndjson" '"next_status":"needs-input"'
 
 bash scripts/features/state/update-pane-state.sh \
   --pane "%8" \
@@ -35,6 +38,26 @@ bash scripts/features/state/update-pane-state.sh \
 
 assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%8.json" '"status":"done-unread"'
 
+cat > "$TMUX_SIDEBAR_STATE_DIR/pane-%8.json" <<'EOF'
+{"pane_id":"%8","app":"codex","status":"done-unread","updated_at":100}
+EOF
+
+bash scripts/features/state/update-pane-state.sh \
+  --pane "%8" \
+  --app codex \
+  --status done \
+  --message "Hook repeated done"
+
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%8.json" '"status":"done-unread"'
+
+bash scripts/features/state/update-pane-state.sh \
+  --pane "%8" \
+  --app codex \
+  --status idle \
+  --message "Hook says idle"
+
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%8.json" '"status":"done-unread"'
+
 bash scripts/features/state/update-pane-state.sh \
   --pane "" \
   --app codex \
@@ -43,4 +66,4 @@ bash scripts/features/state/update-pane-state.sh \
 
 assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%7.json" '"pane_id":"%7"'
 assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%7.json" '"app":"codex"'
-assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%7.json" '"status":"done"'
+assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%7.json" '"status":"done-unread"'

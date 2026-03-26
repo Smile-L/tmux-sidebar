@@ -258,7 +258,6 @@ output="$(python3 scripts/ui/sidebar-ui.py --dump-render 2>&1)"
 assert_contains "$output" '✅'
 assert_file_contains "$TMUX_SIDEBAR_STATE_DIR/pane-%17.json" '"status":"done"'
 
-fake_tmux_set_tree <<'EOF'
 test|@1|python3.12|%30|python3.12|python3.12|1|/Users/lisimin/project/poly_data
 EOF
 rm -f "$TMUX_SIDEBAR_STATE_DIR"/pane-*.json

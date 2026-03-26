@@ -35,6 +35,16 @@ print(json.dumps({
     "running": status.codex_terminal_status("%running"),
     "idle": status.codex_terminal_status("%idle"),
     "approval": status.codex_terminal_status("%approval"),
+    "completed_recently": status.codex_terminal_completed_recently("%idle"),
+    "effective_idle_after_running": status.effective_pane_status("%idle", "node", "v4", {
+        "app": "codex",
+        "status": "running",
+        "inferred": True,
+    }),
+    "effective_done_unread": status.effective_pane_status("%idle", "node", "v4", {
+        "app": "codex",
+        "status": "done-unread",
+    }),
 }, ensure_ascii=False))
 PY
 )"
@@ -42,3 +52,6 @@ PY
 assert_contains "$output" '"running": "running"'
 assert_contains "$output" '"idle": ""'
 assert_contains "$output" '"approval": "needs-input"'
+assert_contains "$output" '"completed_recently": true'
+assert_contains "$output" '"effective_idle_after_running": "done-unread"'
+assert_contains "$output" '"effective_done_unread": "done-unread"'

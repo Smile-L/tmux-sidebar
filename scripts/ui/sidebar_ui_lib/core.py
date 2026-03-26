@@ -8,10 +8,62 @@ import subprocess
 from pathlib import Path
 
 
-STATE_DIR = Path(os.environ.get(
-    "TMUX_SIDEBAR_STATE_DIR",
-    os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state")) + "/tmux-sidebar",
-))
+def _tmux_state_dir_option() -> str:
+    return "@tmux_sidebar_state_dir"
+
+
+def _tmux_option_raw(option_name: str) -> str:
+    try:
+        return subprocess.check_output(
+            ["tmux", "show-options", "-gv", option_name],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return ""
+
+
+def _persist_tmux_state_dir(path: Path) -> None:
+    try:
+        subprocess.run(
+            ["tmux", "set-option", "-g", _tmux_state_dir_option(), str(path)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
+
+def _resolve_state_dir() -> Path:
+    env_override = os.environ.get("TMUX_SIDEBAR_STATE_DIR", "")
+    xdg_state_home = os.environ.get("XDG_STATE_HOME", "")
+    fallback = Path("/tmp") / f"tmux-sidebar-{os.getuid()}"
+    if env_override:
+        preferred = Path(env_override)
+    elif xdg_state_home:
+        preferred = Path(xdg_state_home) / "tmux-sidebar"
+    else:
+        preferred = fallback
+    tmux_shared = Path(_tmux_option_raw(_tmux_state_dir_option())) if not env_override else None
+    candidates = [preferred, fallback]
+    if tmux_shared:
+        candidates = [tmux_shared] + candidates
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write-test"
+            probe.write_text("")
+            probe.unlink()
+            if not env_override:
+                _persist_tmux_state_dir(candidate)
+            return candidate
+        except OSError:
+            continue
+    return preferred
+
+
+STATE_DIR = _resolve_state_dir()
 DEFAULT_SIDEBAR_WIDTH = 50
 DEFAULT_SHORTCUTS = {
     "add_window": "aw",

@@ -12,4 +12,4 @@ state_dir="$(print_state_dir)"
 state_file="$state_dir/pane-$pane_id.json"
 [ -f "$state_file" ] || exit 0
 
-clear_terminal_pane_state "$state_file" || true
+mark_terminal_pane_state_read_on_focus "$state_file" || true

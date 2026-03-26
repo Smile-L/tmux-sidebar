@@ -9,6 +9,21 @@ app=""
 status=""
 message=""
 updated_at=""
+source=""
+
+source_priority() {
+  case "${1:-}" in
+    app-server)
+      printf '30\n'
+      ;;
+    notify|hook)
+      printf '20\n'
+      ;;
+    *)
+      printf '10\n'
+      ;;
+  esac
+}
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -30,6 +45,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --updated-at)
       updated_at="${2:-}"
+      shift 2
+      ;;
+    --source)
+      source="${2:-}"
       shift 2
       ;;
     *)
@@ -55,9 +74,25 @@ if [ -z "$updated_at" ]; then
 fi
 [[ "$updated_at" =~ ^[0-9]+$ ]] || { printf 'invalid updated_at: %s\n' "$updated_at" >&2; exit 1; }
 
+existing_app=""
+existing_status=""
+existing_source=""
+existing_updated_at=""
 if [ -f "$state_file" ]; then
   existing_updated_at="$(json_get_number "$state_file" "updated_at")"
-  if [ -n "$existing_updated_at" ] && [ "$existing_updated_at" -gt "$updated_at" ]; then
+  existing_app="$(json_get_string "$state_file" "app")"
+  existing_status="$(json_get_string "$state_file" "status")"
+  existing_source="$(json_get_string "$state_file" "source")"
+fi
+
+if [ -n "$existing_updated_at" ] && [ "$existing_updated_at" -gt "$updated_at" ]; then
+  append_pane_event_log "$pane_id" "$(printf '{\"ts\":%d,\"pane_id\":\"%s\",\"app\":\"%s\",\"component\":\"update-pane-state\",\"event\":\"旧时间戳丢弃\",\"window_id\":\"\",\"previous_status\":\"%s\",\"requested_status\":\"%s\",\"next_status\":\"%s\"}' "$(date +%s)" "$(json_escape "$pane_id")" "$(json_escape "$app")" "$(json_escape "$existing_status")" "$(json_escape "$status")" "$(json_escape "$existing_status")")"
+  exit 0
+fi
+
+if [ -n "$existing_updated_at" ] && [ "$existing_updated_at" -eq "$updated_at" ]; then
+  if [ "$(source_priority "$existing_source")" -gt "$(source_priority "$source")" ]; then
+    append_pane_event_log "$pane_id" "$(printf '{\"ts\":%d,\"pane_id\":\"%s\",\"app\":\"%s\",\"component\":\"update-pane-state\",\"event\":\"低优先级丢弃\",\"window_id\":\"\",\"previous_status\":\"%s\",\"requested_status\":\"%s\",\"next_status\":\"%s\"}' "$(date +%s)" "$(json_escape "$pane_id")" "$(json_escape "$app")" "$(json_escape "$existing_status")" "$(json_escape "$status")" "$(json_escape "$existing_status")")"
     exit 0
   fi
 fi
@@ -84,8 +119,25 @@ elif [ -f "$state_file" ]; then
 fi
 
 persisted_status="$status"
-if [ "$status" = "done" ] && [ "$pane_active" != "1" ]; then
+transition_reason="写入状态"
+if [ "$app" = "codex" ]; then
+  case "$status" in
+    done)
+      persisted_status="done-unread"
+      transition_reason="Codex完成转未读"
+      ;;
+    idle)
+      case "$existing_status" in
+        running|needs-input|done|done-unread)
+          persisted_status="done-unread"
+          transition_reason="Codex空闲转未读"
+          ;;
+      esac
+      ;;
+  esac
+elif [ "$status" = "done" ] && [ "$pane_active" != "1" ]; then
   persisted_status="done-unread"
+  transition_reason="非活动pane完成转未读"
 fi
 
 tmp_file="$(mktemp "$state_dir/.pane-state.XXXXXX")"
@@ -99,7 +151,10 @@ printf '"pane_current_command":"%s",' "$(json_escape "$pane_current_command")" >
 printf '"app":"%s",' "$(json_escape "$app")" >> "$tmp_file"
 printf '"status":"%s",' "$(json_escape "$persisted_status")" >> "$tmp_file"
 printf '"message":"%s",' "$(json_escape "$message")" >> "$tmp_file"
+printf '"source":"%s",' "$(json_escape "$source")" >> "$tmp_file"
 printf '"updated_at":%s' "$updated_at" >> "$tmp_file"
-printf '}\n' >> "$tmp_file"
+printf '}' >> "$tmp_file"
+printf '\n' >> "$tmp_file"
 mv "$tmp_file" "$state_file"
+append_pane_event_log "$pane_id" "$(printf '{\"ts\":%d,\"pane_id\":\"%s\",\"app\":\"%s\",\"component\":\"update-pane-state\",\"event\":\"%s\",\"window_id\":\"%s\",\"previous_status\":\"%s\",\"requested_status\":\"%s\",\"next_status\":\"%s\"}' "$(date +%s)" "$(json_escape "$pane_id")" "$(json_escape "$app")" "$(json_escape "$transition_reason")" "$(json_escape "$window_id")" "$(json_escape "$existing_status")" "$(json_escape "$status")" "$(json_escape "$persisted_status")")"
 signal_sidebar_refresh
